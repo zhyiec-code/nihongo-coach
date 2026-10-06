@@ -123,19 +123,36 @@ export function listen() {
   return recognizeOnce(null);
 }
 
-// 有些手机不能同时录音和识别；失败一次后记住，之后只识别不录音
-const REC_KEY = 'nihongo-coach-record-ok';
-let recordOk = localStorage.getItem(REC_KEY) !== 'no';
-export const canRecord = () => recordOk && !!window.MediaRecorder && !!navigator.mediaDevices?.getUserMedia;
+// 录音方式：不同手机对“同时录音和识别”的支持不一样，按顺序尝试，记住第一个成功的
+//   track    把录音轨道直接交给语音识别（新版 Chrome）
+//   parallel 录音和识别各自打开麦克风
+//   off      不录音，只识别（没有“我的录音”回放）
+// 某个方式识别成功过一次就“确认”，之后再听不到声音就当作用户真的没说话，不再降级
+const MODE_KEY = 'nihongo-coach-rec-mode';
+const MODES = ['track', 'parallel', 'off'];
+const MODE_NAMES = { track: '录音并识别（方式 1）', parallel: '录音并识别（方式 2）', off: '只识别，不录音' };
+let recMode = { mode: 'track', confirmed: false };
+try {
+  const saved = JSON.parse(localStorage.getItem(MODE_KEY));
+  if (MODES.includes(saved?.mode)) recMode = saved;
+} catch {}
+function setMode(mode, confirmed) {
+  recMode = { mode, confirmed };
+  try { localStorage.setItem(MODE_KEY, JSON.stringify(recMode)); } catch {}
+}
+export const canRecord = () => recMode.mode !== 'off' && !!window.MediaRecorder && !!navigator.mediaDevices?.getUserMedia;
+export const recordModeInfo = () => `${MODE_NAMES[recMode.mode]}${recMode.confirmed ? '' : '（检测中）'}`;
+export const resetRecordMode = () => setMode('track', false);
 
 // 跟读一次：同时录音（用于回放）和识别（用于打分）
 export async function recordAttempt() {
   if (!Rec) throw new Error('当前浏览器不支持语音识别，请用 Chrome 或 Safari');
   speechSynthesis.cancel();
+  const mode = canRecord() ? recMode.mode : 'off';
   let stream = null;
   let rec = null;
   const chunks = [];
-  if (canRecord()) {
+  if (mode !== 'off') {
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
       rec = new MediaRecorder(stream);
@@ -159,17 +176,26 @@ export async function recordAttempt() {
     };
     rec.stop();
   });
+  // 录音占用麦克风导致识别听不到时，换下一种方式，并请用户再说一次
+  const downgrade = () => {
+    const next = MODES[MODES.indexOf(mode) + 1] || 'off';
+    setMode(next, false);
+    return new Error(next === 'off'
+      ? '这台手机不能同时录音和识别，已关闭“我的录音”回放，请再说一次'
+      : '这台手机的录音和识别冲突了，已自动换一种方式，请再说一次');
+  };
   try {
-    const alts = await recognizeOnce(stream?.getAudioTracks()[0]);
+    const alts = await recognizeOnce(mode === 'track' ? stream?.getAudioTracks()[0] : null);
     const audioUrl = await stopRecording();
+    if (alts.length) {
+      if (!recMode.confirmed) setMode(mode, true);
+      return { alts, audioUrl };
+    }
+    if (stream && !recMode.confirmed) throw downgrade();
     return { alts, audioUrl };
   } catch (e) {
     await stopRecording();
-    if (stream && ['audio-capture', 'aborted', 'service-not-allowed'].includes(e.code)) {
-      recordOk = false;
-      try { localStorage.setItem(REC_KEY, 'no'); } catch {}
-      throw new Error('这台手机不能同时录音和识别，已关闭“回放我的录音”，请再说一次');
-    }
+    if (stream && !recMode.confirmed && ['no-speech', 'audio-capture', 'aborted', 'service-not-allowed'].includes(e.code)) throw downgrade();
     throw e;
   }
 }

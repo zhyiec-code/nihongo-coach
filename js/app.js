@@ -8,6 +8,7 @@ import {
 } from './store.js';
 import {
   speak, listen, recordAttempt, similarity, diffChars, sttSupported, ttsSupported, hasJaVoice, ttsDiagnosis,
+  recordModeInfo, resetRecordMode,
 } from './speech.js';
 import { hasKey, generateLesson, chatSystem, chatTurn, summarize, evalSpeaking, pronunciationFeedback } from './ai.js';
 
@@ -902,7 +903,8 @@ function viewSettings() {
       <div class="row"><button class="btn" id="test">🔊 试听</button><button class="btn ghost" data-diag>听不到声音？</button></div>
       <label class="check"><input type="checkbox" id="reading" ${st.showReading ? 'checked' : ''}> 显示平假名读音</label>
       <p class="hint">朗读：${ttsSupported ? (hasJaVoice() ? '✅ 已找到日语语音' : '⚠️ 没找到日语语音，点「听不到声音？」查看解决办法') : '❌ 不支持'}<br>
-      语音识别：${sttSupported ? '✅ 支持' : '❌ 当前浏览器不支持（可打字代替）。推荐 Android 用 Chrome，iPhone 用 Safari'}</p>
+      语音识别：${sttSupported ? '✅ 支持' : '❌ 当前浏览器不支持（可打字代替）。推荐 Android 用 Chrome，iPhone 用 Safari'}<br>
+      跟读录音：<span id="recmode">${esc(recordModeInfo())}</span> <button class="selfpass inline" id="recreset">重新检测</button></p>
     </section>
     <section class="card">
       <h2>数据</h2>
@@ -917,6 +919,10 @@ function viewSettings() {
     <button class="btn primary block" id="save">保存设置</button>`;
   $('#rate').oninput = (e) => ($('#rv').textContent = e.target.value);
   $('#test').onclick = () => speak('こんにちは。一緒に日本語を練習しましょう。', +$('#rate').value);
+  $('#recreset').onclick = () => {
+    resetRecordMode();
+    $('#recmode').textContent = recordModeInfo();
+  };
   $('#save').onclick = () => {
     st.apiKey = $('#key').value.trim();
     st.model = $('#model').value;

@@ -133,6 +133,7 @@ label.check input { width: auto; margin: 0; }
 .pr-result.pass { border-color: var(--ok); }
 .pr-result.fail { border-color: var(--warn); }
 .pr-result.checking { border-style: dashed; }
+.selfpass.inline { display: inline; margin: 0; }
 .selfpass { display: block; margin-top: 8px; background: none; border: 0; padding: 0; color: var(--muted); font: inherit; font-size: .8rem; text-decoration: underline; cursor: pointer; }
 .pr-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 .pr-head .score { font-size: 1.2rem; }
