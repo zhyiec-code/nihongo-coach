@@ -6,7 +6,7 @@ import {
   S, save, resetAll, exportData, importData, TOTAL_DAYS, unitForWeek, levelForUnit, dayInfo,
   completeDay, logMinutes, today, streak, addCards, dueCards, gradeCard,
 } from './store.js';
-import { speak, listen, similarity, sttSupported, ttsSupported, hasJaVoice } from './speech.js';
+import { speak, listen, similarity, sttSupported, ttsSupported, hasJaVoice, ttsDiagnosis } from './speech.js';
 import { hasKey, generateLesson, chatSystem, chatTurn, summarize, evalSpeaking } from './ai.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -58,6 +58,7 @@ function bindShadowMics(root, getTargets) {
 document.addEventListener('click', (e) => {
   const say = e.target.closest('[data-say]');
   if (say) speak(say.dataset.say);
+  if (e.target.closest('[data-diag]')) alert(ttsDiagnosis());
   const rev = e.target.closest('[data-reveal]');
   if (rev) rev.classList.toggle('shown');
 });
@@ -201,7 +202,7 @@ function viewTest() {
       <section class="card">
         <h2>水平测试 · 2/3 笔试与听力</h2>
         <div class="test-meta">难度 ${t.lv}/5 · 第 ${qNo} 题</div>
-        ${it.type === 'listen' ? `<button class="btn big-say" data-say="${esc(it.audio)}">🔊 播放语音</button>` : ''}
+        ${it.type === 'listen' ? `<button class="btn big-say" data-say="${esc(it.audio)}">🔊 播放语音</button><button class="diag" data-diag>听不到声音？</button>` : ''}
         <p class="question" lang="ja">${esc(it.q)}</p>
         <div class="choices">
           ${it.options.map((o, i) => `<button class="btn" data-i="${i}" lang="ja">${esc(o)}</button>`).join('')}
@@ -238,7 +239,7 @@ function viewTest() {
       <section class="card">
         <h2>水平测试 · 3/3 口语</h2>
         <div class="test-meta">第 ${i + 1} / ${SPEAKING_QUESTIONS.length} 题 · 听问题，用日语回答</div>
-        <button class="btn big-say" data-say="${esc(q)}">🔊 再听一次</button>
+        <button class="btn big-say" data-say="${esc(q)}">🔊 再听一次</button><button class="diag" data-diag>听不到声音？</button>
         <p class="question zh" data-reveal lang="ja">${esc(q)}<small>（点击显示文字）</small></p>
         ${sttSupported ? '<button class="mic big" id="rec">🎤 按下后开始说</button>' : ''}
         <textarea id="ans" rows="2" placeholder="识别结果会出现在这里，也可以直接用日语输入" lang="ja"></textarea>
@@ -838,9 +839,9 @@ function viewSettings() {
     <section class="card">
       <h2>语音</h2>
       <label>朗读速度 <span id="rv">${st.ttsRate}</span><input type="range" id="rate" min="0.5" max="1.2" step="0.05" value="${st.ttsRate}"></label>
-      <button class="btn" id="test">🔊 试听</button>
+      <div class="row"><button class="btn" id="test">🔊 试听</button><button class="btn ghost" data-diag>听不到声音？</button></div>
       <label class="check"><input type="checkbox" id="reading" ${st.showReading ? 'checked' : ''}> 显示平假名读音</label>
-      <p class="hint">朗读：${ttsSupported ? (hasJaVoice() ? '✅ 已找到日语语音' : '⚠️ 没找到日语语音包，请在系统设置里添加日语语音') : '❌ 不支持'}<br>
+      <p class="hint">朗读：${ttsSupported ? (hasJaVoice() ? '✅ 已找到日语语音' : '⚠️ 没找到日语语音，点「听不到声音？」查看解决办法') : '❌ 不支持'}<br>
       语音识别：${sttSupported ? '✅ 支持' : '❌ 当前浏览器不支持（可打字代替）。推荐 Android 用 Chrome，iPhone 用 Safari'}</p>
     </section>
     <section class="card">
