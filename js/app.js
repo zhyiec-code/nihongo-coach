@@ -10,7 +10,9 @@ import {
   speak, listen, recordAttempt, similarity, diffChars, sttSupported, ttsSupported, hasJaVoice, ttsDiagnosis,
   recordModeInfo, resetRecordMode,
 } from './speech.js';
-import { hasKey, generateLesson, chatSystem, chatTurn, summarize, evalSpeaking, pronunciationFeedback } from './ai.js';
+import {
+  hasKey, generateLesson, chatSystem, chatTurn, summarize, evalSpeaking, pronunciationFeedback, lookupWord,
+} from './ai.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -23,11 +25,78 @@ const main = () => $('#main');
 function jaBlock({ ja, reading, zh, note }, { big = false, showZh = false } = {}) {
   const showReading = S().settings.showReading && reading && reading !== ja;
   return `<div class="ja-block ${big ? 'big' : ''}">
-    <div class="ja-row"><button class="say" data-say="${esc(ja)}" aria-label="朗读">🔊</button><span class="ja" lang="ja">${esc(ja)}</span></div>
+    <div class="ja-row"><button class="say" data-say="${esc(ja)}" aria-label="朗读">🔊</button><span class="ja" lang="ja" data-sent="${esc(ja)}">${tappable(ja)}</span></div>
     ${showReading ? `<div class="reading" lang="ja">${esc(reading)}</div>` : ''}
     ${zh ? `<div class="zh ${showZh ? 'shown' : ''}" data-reveal>${esc(zh)}</div>` : ''}
     ${note ? `<div class="note">💡 ${esc(note)}</div>` : ''}
   </div>`;
+}
+
+// 把日语句子切成可点击的词（浏览器自带的日语分词）
+const segmenter = window.Intl?.Segmenter ? new Intl.Segmenter('ja', { granularity: 'word' }) : null;
+function tappable(text) {
+  if (!segmenter) return esc(text);
+  return [...segmenter.segment(text)]
+    .map((s) => (s.isWordLike ? `<span class="w" data-w="${esc(s.segment)}">${esc(s.segment)}</span>` : esc(s.segment)))
+    .join('');
+}
+
+// 点词弹出的解释面板：读出这个词，显示意思；面板一直显示，直到关闭或点下一个词
+function wordSheet() {
+  let el = $('#wordsheet');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'wordsheet';
+    el.hidden = true;
+    document.body.appendChild(el);
+  }
+  return el;
+}
+function closeWordSheet() {
+  const el = $('#wordsheet');
+  if (el) el.hidden = true;
+  $$('.w.picked').forEach((w) => w.classList.remove('picked'));
+}
+async function showWord(word, sentence) {
+  const el = wordSheet();
+  el.hidden = false;
+  // 查过的词用平假名读音朗读，避免汉字单独出现时被读错
+  const cached = (S().dict || {})[`${word}|${sentence}`];
+  speak(cached?.reading || word);
+  const head = `<button class="ws-close" data-wsclose aria-label="关闭">✕</button>
+    <div class="ws-word"><span lang="ja">${esc(word)}</span><button class="say" data-say="${esc(word)}">🔊</button></div>`;
+  if (!hasKey()) {
+    el.innerHTML = `${head}<p class="hint">填写 Claude API Key 后，可以在这里看到这个词的读音和解释。</p>`;
+    return;
+  }
+  const key = `${word}|${sentence}`;
+  const dict = S().dict || (S().dict = {});
+  let info = dict[key];
+  if (!info) {
+    el.innerHTML = `${head}<p class="hint">正在查询…</p>`;
+    try {
+      info = await lookupWord({ word, sentence });
+      dict[key] = info;
+      save();
+    } catch (e) {
+      el.innerHTML = `${head}${errorBox(e.message)}`;
+      return;
+    }
+    if (el.dataset.word !== key) return; // 查询期间又点了别的词
+  }
+  el.innerHTML = `${head}
+    <div class="ws-reading" lang="ja">${esc(info.reading)}${info.dictionary_form && info.dictionary_form !== word ? `　原形：${esc(info.dictionary_form)}` : ''}</div>
+    <div class="ws-meaning"><span class="ws-pos">${esc(info.pos_zh)}</span>${esc(info.meaning_zh)}</div>
+    ${info.usage_zh ? `<p>${esc(info.usage_zh)}</p>` : ''}
+    ${info.kanji_zh ? `<p class="ws-kanji">🈶 ${esc(info.kanji_zh)}</p>` : ''}
+    <button class="btn sm" data-wsadd>＋ 加入复习卡片</button>`;
+  $('[data-say]', el).dataset.say = info.reading || word;
+  $('[data-wsadd]', el).onclick = (e) => {
+    const form = info.dictionary_form || word;
+    const n = addCards([{ ja: form, reading: info.reading, zh: info.meaning_zh, note: `出自：${sentence}` }], 'word');
+    e.target.textContent = n ? '✅ 已加入' : '已经在卡片里了';
+    e.target.disabled = true;
+  };
 }
 
 function micButton(label = '跟读') {
@@ -66,18 +135,20 @@ function bindShadowMics(root, getTargets, onProgress) {
         const useAI = !exact && hasKey();
         const state = exact ? 'pass' : useAI ? 'checking' : 'fail';
 
-        const render = (st, fb) => {
+        // 结果一直显示，直到下一次跟读出结果或进入下一句；通过时也保留标红和 AI 的说明
+        const render = (st, fb, selfPassed = false) => {
           const ok = st === 'pass';
-          const head = ok ? '✅ 读对了！' : st === 'checking' ? '🤖 AI 正在检查你的发音…' : '还没读对，听一下区别再试一次';
+          const head = ok ? '✅ 读对了！' : st === 'checking' ? '🤖 AI 正在检查你的发音…' : '还没读对，看看下面的说明，听一下区别再试一次';
+          const ai = fb?.problems ? fb : null;
           out.innerHTML = `
             <div class="pr-result ${st}">
               <div class="pr-head"><span class="score ${ok ? 's3' : st === 'checking' ? 's2' : 's1'}">${score}%</span><span>第 ${tries} 次 · ${head}</span></div>
-              ${exact || (ok && fb) ? '' : `<div class="pr-diff" lang="ja">${diff.map((d) => (d.ok ? esc(d.c) : `<mark>${esc(d.c)}</mark>`)).join('')}</div>
-              <div class="pr-legend">标红的是没读出来或读错的部分</div>`}
+              ${exact ? '' : `<div class="pr-diff" lang="ja">${diff.map((d) => (d.ok ? esc(d.c) : `<mark>${esc(d.c)}</mark>`)).join('')}</div>
+              <div class="pr-legend">${ok && selfPassed ? '你确认了读对（语音识别可能听错了）。' : ok && ai ? 'AI 判断：标红处只是汉字和假名的写法不同，发音是对的。' : '标红的是没读出来或读错的部分'}</div>`}
               <div class="pr-heard">识别到：<span lang="ja">${esc(alts[0])}</span></div>
-              ${fb && !ok ? `<div class="pr-ai">${fb.problems.map((p) => `<div class="pr-problem"><b lang="ja">${esc(p.part)}</b>：${esc(p.issue_zh)}<div class="how">👉 ${esc(p.how_zh)}</div></div>`).join('')}
-                <div class="pr-tip">💡 ${esc(fb.tip_zh)}</div></div>` : ''}
-              ${fb && ok && !fb.selfPassed ? '<div class="pr-legend">只是汉字和假名的写法不同，发音是对的。</div>' : ''}
+              ${ai && (ai.problems.length || ai.tip_zh) ? `<div class="pr-ai">
+                ${ai.problems.map((p) => `<div class="pr-problem"><b lang="ja">${esc(p.part)}</b>：${esc(p.issue_zh)}<div class="how">👉 ${esc(p.how_zh)}</div></div>`).join('')}
+                ${ai.tip_zh ? `<div class="pr-tip">💡 ${esc(ai.tip_zh)}</div>` : ''}</div>` : ''}
               <div class="pr-actions">
                 ${myAudio ? '<button class="btn sm" data-mine>▶ 我的录音</button>' : ''}
                 <button class="btn sm" data-say="${esc(ja)}">🔊 标准发音</button>
@@ -88,7 +159,7 @@ function bindShadowMics(root, getTargets, onProgress) {
           if (myAudio) $('[data-mine]', out).onclick = () => { speechSynthesis.cancel(); new Audio(myAudio).play(); };
           $('[data-slow]', out).onclick = () => speak(ja, 0.6);
           const self = $('[data-selfpass]', out);
-          if (self) self.onclick = () => render('pass', { selfPassed: true });
+          if (self) self.onclick = () => render('pass', fb, true);
           if (ok) {
             btn.closest('.item')?.classList.add('passed');
             if (!passed.has(i)) {
@@ -118,6 +189,15 @@ document.addEventListener('click', (e) => {
   const say = e.target.closest('[data-say]');
   if (say) speak(say.dataset.say);
   if (e.target.closest('[data-diag]')) alert(ttsDiagnosis());
+  const w = e.target.closest('.w[data-w]');
+  if (w) {
+    $$('.w.picked').forEach((x) => x.classList.remove('picked'));
+    w.classList.add('picked');
+    const sentence = w.closest('[data-sent]')?.dataset.sent || w.dataset.w;
+    wordSheet().dataset.word = `${w.dataset.w}|${sentence}`;
+    showWord(w.dataset.w, sentence);
+  }
+  if (e.target.closest('[data-wsclose]')) closeWordSheet();
   const rev = e.target.closest('[data-reveal]');
   if (rev) rev.classList.toggle('shown');
 });
@@ -137,6 +217,7 @@ const routes = {
 let leaveHook = null;
 function router() {
   speechSynthesis?.cancel?.();
+  closeWordSheet();
   if (leaveHook) leaveHook();
   leaveHook = null;
   const [name, arg] = location.hash.replace(/^#\/?/, '').split('/');
@@ -507,7 +588,7 @@ async function viewSession(arg) {
       <section class="card goal">🎯 ${esc(L.goal_zh)}</section>
       <section class="card">
         <h2>核心句子</h2>
-        <p class="hint">先听 → 点 🎤 跟读，读错的字会标红，听听自己的录音和标准发音有什么不同，一直练到读对 → 再遮住日语看中文试着说出来。这些句子已自动加入复习卡片。</p>
+        <p class="hint">先听 → 点 🎤 跟读，读错的字会标红，听听自己的录音和标准发音有什么不同，一直练到读对 → 再遮住日语看中文试着说出来。不认识的词，直接点它就能听读音、看解释。这些句子已自动加入复习卡片。</p>
         <div class="pass-count">已读对 <b id="pc">0</b> / ${L.phrases.length} 句</div>
         ${L.phrases.map((p) => `<div class="item">${jaBlock({ ...p, note: p.note_zh })}${micButton()}</div>`).join('')}
       </section>

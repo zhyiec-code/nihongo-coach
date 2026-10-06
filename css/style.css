@@ -237,3 +237,22 @@ body.no-tabs .chat-input { bottom: 64px; }
 .tabbar a span { display: block; font-size: 1.25rem; filter: grayscale(1); opacity: .7; }
 .tabbar a.active { color: var(--accent); font-weight: 700; }
 .tabbar a.active span { filter: none; opacity: 1; }
+
+/* 点词查询 */
+.w { cursor: pointer; border-radius: 3px; -webkit-tap-highlight-color: transparent; }
+.w:hover { background: var(--accent-soft); }
+.w.picked { background: var(--accent-soft); box-shadow: inset 0 -2px 0 var(--accent); }
+.msg.user .w.picked, .msg.user .w:hover { background: rgba(255, 255, 255, .25); }
+#wordsheet {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; max-height: 55vh; overflow-y: auto;
+  max-width: 640px; margin: 0 auto; background: var(--card); border: 1px solid var(--line); border-bottom: 0;
+  border-radius: 18px 18px 0 0; box-shadow: 0 -8px 30px rgba(0, 0, 0, .18);
+  padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+}
+#wordsheet p { margin: 8px 0; font-size: .92rem; }
+.ws-close { position: absolute; top: 10px; right: 12px; background: none; border: 0; font-size: 1.1rem; color: var(--muted); cursor: pointer; padding: 6px; }
+.ws-word { display: flex; align-items: center; gap: 10px; font-size: 1.7rem; font-weight: 800; padding-right: 32px; }
+.ws-reading { color: var(--muted); }
+.ws-meaning { font-size: 1.1rem; font-weight: 700; margin-top: 6px; }
+.ws-pos { display: inline-block; font-size: .72rem; font-weight: 600; color: var(--accent); background: var(--accent-soft); border-radius: 99px; padding: 1px 8px; margin-right: 8px; vertical-align: middle; }
+.ws-kanji { color: var(--muted); }

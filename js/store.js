@@ -11,6 +11,7 @@ const defaults = () => ({
   cards: [],
   lessons: {},
   log: {}, // 'YYYY-MM-DD' -> 分钟数
+  dict: {}, // 点词查询缓存：'词|句子' -> 解释
 });
 
 let state;

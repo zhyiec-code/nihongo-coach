@@ -1,5 +1,5 @@
 ﻿// 离线缓存：应用本身缓存到手机上；API 请求始终走网络
-const CACHE = 'nihongo-coach-v4';
+const CACHE = 'nihongo-coach-v5';
 const SHELL = [
   './', 'index.html', 'css/style.css', 'manifest.webmanifest',
   'js/app.js', 'js/data.js', 'js/store.js', 'js/speech.js', 'js/ai.js',

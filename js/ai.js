@@ -180,6 +180,33 @@ ${heard.map((h, i) => `${i + 1}. ${h}`).join('\n')}
   return askJSON({ system, messages: [{ role: 'user', content: user }], schema: PRON_SCHEMA, effort: 'low' });
 }
 
+// ---------- 点词查询 ----------
+const WORD_SCHEMA = obj({
+  word: str,
+  dictionary_form: str,
+  reading: str,
+  meaning_zh: str,
+  pos_zh: str,
+  usage_zh: str,
+  kanji_zh: str,
+});
+
+export function lookupWord({ word, sentence }) {
+  const system = '你是给中国学生用的日语词典，解释简洁准确。';
+  const user = `学生在这句日语里点了一个词，请解释它在这句话里的意思。
+句子：${sentence}
+点的词：${word}
+
+- word：学生点的这个词（照抄）。如果它只是一个词的一部分（如动词词尾、助动词被切开了），仍然只解释它，但在 usage_zh 里说明它和前后连起来的意思。
+- dictionary_form：词典形（原形），没有变化时和 word 相同。
+- reading：word 的平假名读音。
+- meaning_zh：在这句话里的中文意思，简短。
+- pos_zh：词性（如 名词、动词（て形）、助词、い形容词）。
+- usage_zh：一两句话说明在这句里的用法或语法作用；中国学生容易误解的汉字词要特别提醒。
+- kanji_zh：如果含汉字，逐个汉字写“字（音读/训读）：意思”，用顿号分隔；不含汉字时为空字符串。`;
+  return askJSON({ system, messages: [{ role: 'user', content: user }], schema: WORD_SCHEMA, effort: 'low' });
+}
+
 // ---------- 分级测试中的口语评估 ----------
 const SPEAKING_SCHEMA = obj({ speaking_level: { type: 'integer' }, comment_zh: str });
 
