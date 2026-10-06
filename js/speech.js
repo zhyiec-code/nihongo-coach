@@ -251,3 +251,56 @@ export function diffChars(heardList, targets) {
   return chars.map((c, i) => ({ c, ok: PUNCT.test(c) || matched.has(i) }));
 }
 
+
+// ---------- 只录音（“录一遍听听”）----------
+// 不做识别，所以不会和语音识别抢麦克风。说完停顿约 1 秒自动停止，也可以手动停止
+export const canSelfRecord = () => !!window.MediaRecorder && !!navigator.mediaDevices?.getUserMedia;
+let selfRec = null;
+export const isSelfRecording = () => !!selfRec;
+export function stopSelfRecording() {
+  if (selfRec?.state === 'recording') selfRec.stop();
+}
+export async function recordSelf() {
+  speechSynthesis.cancel();
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+  } catch (e) {
+    throw new Error(e.name === 'NotAllowedError' ? ERRORS['not-allowed'] : '无法打开麦克风');
+  }
+  const rec = new MediaRecorder(stream);
+  const chunks = [];
+  rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+  // 用音量判断什么时候说完了
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const analyser = ctx.createAnalyser();
+  analyser.fftSize = 1024;
+  ctx.createMediaStreamSource(stream).connect(analyser);
+  const buf = new Float32Array(analyser.fftSize);
+  const started = performance.now();
+  let spoke = false;
+  let lastLoud = started;
+  return new Promise((resolve) => {
+    const timer = setInterval(() => {
+      analyser.getFloatTimeDomainData(buf);
+      const rms = Math.sqrt(buf.reduce((s, v) => s + v * v, 0) / buf.length);
+      const now = performance.now();
+      if (rms > 0.02) {
+        spoke = true;
+        lastLoud = now;
+      }
+      const silentAfterSpeech = spoke && now - lastLoud > 1200;
+      const nothingSaid = !spoke && now - started > 7000;
+      if (silentAfterSpeech || nothingSaid || now - started > 20000) stopSelfRecording();
+    }, 100);
+    rec.onstop = () => {
+      clearInterval(timer);
+      stream.getTracks().forEach((t) => t.stop());
+      ctx.close();
+      selfRec = null;
+      resolve(chunks.length ? URL.createObjectURL(new Blob(chunks, { type: rec.mimeType || 'audio/webm' })) : null);
+    };
+    rec.start();
+    selfRec = rec;
+  });
+}

@@ -8,7 +8,7 @@ import {
 } from './store.js';
 import {
   speak, listen, recordAttempt, similarity, diffChars, sttSupported, ttsSupported, hasJaVoice, ttsDiagnosis,
-  recordModeInfo, resetRecordMode,
+  recordModeInfo, resetRecordMode, canSelfRecord, recordSelf, stopSelfRecording, isSelfRecording,
 } from './speech.js';
 import {
   hasKey, generateLesson, chatSystem, chatTurn, summarize, evalSpeaking, pronunciationFeedback, lookupWord,
@@ -100,7 +100,52 @@ async function showWord(word, sentence) {
 }
 
 function micButton(label = '跟读') {
-  return `<div class="practice"><button class="mic" data-mic>🎤 ${label}</button><div class="pr-out"></div></div>`;
+  return `<div class="practice">
+    <div class="pr-btns"><button class="mic" data-mic>🎤 ${label}</button>${canSelfRecord() ? '<button class="mic" data-selfrec>🎙 录一遍听听</button>' : ''}</div>
+    <div class="self-out"></div><div class="pr-out"></div></div>`;
+}
+
+// “录一遍听听”：只录音不打分。录完先放自己的录音，再放标准发音，方便对比
+function bindSelfRecord(box, getJa) {
+  const btn = $('[data-selfrec]', box);
+  if (!btn) return;
+  const out = $('.self-out', box);
+  let url = null;
+  const playCompare = () => {
+    speechSynthesis.cancel();
+    const a = new Audio(url);
+    a.onended = () => setTimeout(() => speak(getJa()), 400);
+    a.play();
+  };
+  btn.onclick = async () => {
+    if (isSelfRecording()) return stopSelfRecording();
+    const micBtn = $('[data-mic]', box);
+    micBtn.disabled = true;
+    btn.classList.add('listening');
+    btn.textContent = '■ 说完会自动停止（点这里停止）';
+    try {
+      const newUrl = await recordSelf();
+      if (!newUrl) {
+        out.innerHTML = '<div class="pr-result fail">没有录到声音，再试一次</div>';
+        return;
+      }
+      if (url) URL.revokeObjectURL(url);
+      url = newUrl;
+      out.innerHTML = `<div class="self-result">
+        <span>🎙 你的录音：</span>
+        <button class="btn sm" data-playself>▶ 我的录音</button>
+        <button class="btn sm" data-compare>🔁 我的 + 标准对比</button></div>`;
+      $('[data-playself]', out).onclick = () => { speechSynthesis.cancel(); new Audio(url).play(); };
+      $('[data-compare]', out).onclick = playCompare;
+      playCompare();
+    } catch (e) {
+      out.innerHTML = `<div class="pr-result fail">${esc(e.message)}</div>`;
+    } finally {
+      micBtn.disabled = false;
+      btn.classList.remove('listening');
+      btn.textContent = '🎙 再录一遍';
+    }
+  };
 }
 
 // 绑定跟读练习：录音 + 识别 → 打分、标出读错的字、回放自己的录音、AI 分析，直到读对为止
@@ -108,11 +153,14 @@ function micButton(label = '跟读') {
 function bindShadowMics(root, getTargets, onProgress) {
   const passed = new Set();
   $$('[data-mic]', root).forEach((btn, i) => {
-    const out = btn.nextElementSibling;
+    const box = btn.closest('.practice');
+    const out = $('.pr-out', box);
+    bindSelfRecord(box, () => getTargets(i)[0]);
     const label = btn.textContent;
     let tries = 0;
     let myAudio = null;
     btn.onclick = async () => {
+      if (isSelfRecording()) return;
       const [ja, reading] = getTargets(i);
       btn.disabled = true;
       btn.classList.add('listening');
@@ -588,7 +636,7 @@ async function viewSession(arg) {
       <section class="card goal">🎯 ${esc(L.goal_zh)}</section>
       <section class="card">
         <h2>核心句子</h2>
-        <p class="hint">先听 → 点 🎤 跟读，读错的字会标红，听听自己的录音和标准发音有什么不同，一直练到读对 → 再遮住日语看中文试着说出来。不认识的词，直接点它就能听读音、看解释。这些句子已自动加入复习卡片。</p>
+        <p class="hint">先听 → 点 🎤 跟读，读错的字会标红，一直练到读对；点 🎙 录一遍听听，会先放你的录音再放标准发音，对比哪里不一样 → 再遮住日语看中文试着说出来。不认识的词，直接点它就能听读音、看解释。这些句子已自动加入复习卡片。</p>
         <div class="pass-count">已读对 <b id="pc">0</b> / ${L.phrases.length} 句</div>
         ${L.phrases.map((p) => `<div class="item">${jaBlock({ ...p, note: p.note_zh })}${micButton()}</div>`).join('')}
       </section>

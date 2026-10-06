@@ -256,3 +256,8 @@ body.no-tabs .chat-input { bottom: 64px; }
 .ws-meaning { font-size: 1.1rem; font-weight: 700; margin-top: 6px; }
 .ws-pos { display: inline-block; font-size: .72rem; font-weight: 600; color: var(--accent); background: var(--accent-soft); border-radius: 99px; padding: 1px 8px; margin-right: 8px; vertical-align: middle; }
 .ws-kanji { color: var(--muted); }
+
+/* 录一遍听听 */
+.pr-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.pr-btns .mic { margin-top: 6px; }
+.self-result { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 8px; font-size: .85rem; color: var(--muted); }
