@@ -6,8 +6,10 @@ import {
   S, save, resetAll, exportData, importData, TOTAL_DAYS, unitForWeek, levelForUnit, dayInfo,
   completeDay, logMinutes, today, streak, addCards, dueCards, gradeCard,
 } from './store.js';
-import { speak, listen, similarity, sttSupported, ttsSupported, hasJaVoice, ttsDiagnosis } from './speech.js';
-import { hasKey, generateLesson, chatSystem, chatTurn, summarize, evalSpeaking } from './ai.js';
+import {
+  speak, listen, recordAttempt, similarity, diffChars, sttSupported, ttsSupported, hasJaVoice, ttsDiagnosis,
+} from './speech.js';
+import { hasKey, generateLesson, chatSystem, chatTurn, summarize, evalSpeaking, pronunciationFeedback } from './ai.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -28,28 +30,84 @@ function jaBlock({ ja, reading, zh, note }, { big = false, showZh = false } = {}
 }
 
 function micButton(label = '跟读') {
-  return `<button class="mic" data-mic>🎤 ${label}</button><span class="mic-result"></span>`;
+  return `<div class="practice"><button class="mic" data-mic>🎤 ${label}</button><div class="pr-out"></div></div>`;
 }
 
-// 绑定跟读按钮：识别后与目标句比较打分
-function bindShadowMics(root, getTargets) {
+// 绑定跟读练习：录音 + 识别 → 打分、标出读错的字、回放自己的录音、AI 分析，直到读对为止
+// getTargets(i) 返回 [日语原文, 平假名读音]；onProgress(passedCount) 在读对一句时调用
+function bindShadowMics(root, getTargets, onProgress) {
+  const passed = new Set();
   $$('[data-mic]', root).forEach((btn, i) => {
+    const out = btn.nextElementSibling;
+    const label = btn.textContent;
+    let tries = 0;
+    let myAudio = null;
     btn.onclick = async () => {
-      const out = btn.nextElementSibling;
+      const [ja, reading] = getTargets(i);
       btn.disabled = true;
       btn.classList.add('listening');
-      out.textContent = '正在听…';
+      btn.textContent = '🎤 请开始说…';
       try {
-        const heard = await listen();
-        const score = similarity(heard, getTargets(i));
-        out.innerHTML = heard.length
-          ? `<span class="score s${Math.floor(score / 25)}">${score}%</span> <span lang="ja">${esc(heard[0])}</span>`
-          : '没听清，再试一次';
+        const { alts, audioUrl } = await recordAttempt();
+        if (myAudio) URL.revokeObjectURL(myAudio);
+        myAudio = audioUrl;
+        if (!alts.length) {
+          out.innerHTML = '<div class="pr-result fail">没听清，靠近一点再试一次</div>';
+          return;
+        }
+        tries++;
+        const thisTry = tries;
+        const score = similarity(alts, [ja, reading]);
+        const diff = diffChars(alts, [ja, reading]);
+        const exact = diff.length > 0 && diff.every((d) => d.ok);
+        // 每个字都对上才直接通过。只错一个音（如 おばあさん→おばさん）相似度也有 95%，所以不能只看分数。
+        // 有标红时，有 Key 就让 AI 判断是真读错还是只是汉字写法不同；没有 Key 时由学生自己确认
+        const useAI = !exact && hasKey();
+        const state = exact ? 'pass' : useAI ? 'checking' : 'fail';
+
+        const render = (st, fb) => {
+          const ok = st === 'pass';
+          const head = ok ? '✅ 读对了！' : st === 'checking' ? '🤖 AI 正在检查你的发音…' : '还没读对，听一下区别再试一次';
+          out.innerHTML = `
+            <div class="pr-result ${st}">
+              <div class="pr-head"><span class="score ${ok ? 's3' : st === 'checking' ? 's2' : 's1'}">${score}%</span><span>第 ${tries} 次 · ${head}</span></div>
+              ${exact || (ok && fb) ? '' : `<div class="pr-diff" lang="ja">${diff.map((d) => (d.ok ? esc(d.c) : `<mark>${esc(d.c)}</mark>`)).join('')}</div>
+              <div class="pr-legend">标红的是没读出来或读错的部分</div>`}
+              <div class="pr-heard">识别到：<span lang="ja">${esc(alts[0])}</span></div>
+              ${fb && !ok ? `<div class="pr-ai">${fb.problems.map((p) => `<div class="pr-problem"><b lang="ja">${esc(p.part)}</b>：${esc(p.issue_zh)}<div class="how">👉 ${esc(p.how_zh)}</div></div>`).join('')}
+                <div class="pr-tip">💡 ${esc(fb.tip_zh)}</div></div>` : ''}
+              ${fb && ok && !fb.selfPassed ? '<div class="pr-legend">只是汉字和假名的写法不同，发音是对的。</div>' : ''}
+              <div class="pr-actions">
+                ${myAudio ? '<button class="btn sm" data-mine>▶ 我的录音</button>' : ''}
+                <button class="btn sm" data-say="${esc(ja)}">🔊 标准发音</button>
+                <button class="btn sm" data-slow>🐢 慢速</button>
+              </div>
+              ${st === 'fail' ? '<button class="selfpass" data-selfpass>识别错了？我确定读对了</button>' : ''}
+            </div>`;
+          if (myAudio) $('[data-mine]', out).onclick = () => { speechSynthesis.cancel(); new Audio(myAudio).play(); };
+          $('[data-slow]', out).onclick = () => speak(ja, 0.6);
+          const self = $('[data-selfpass]', out);
+          if (self) self.onclick = () => render('pass', { selfPassed: true });
+          if (ok) {
+            btn.closest('.item')?.classList.add('passed');
+            if (!passed.has(i)) {
+              passed.add(i);
+              onProgress?.(passed.size);
+            }
+          }
+        };
+        render(state);
+        if (useAI) {
+          pronunciationFeedback({ ja, reading, heard: alts })
+            .then((fb) => { if (thisTry === tries) render(fb.correct ? 'pass' : 'fail', fb); }) // 已开始新的一次时丢弃旧结果
+            .catch(() => { if (thisTry === tries) render('fail'); });
+        }
       } catch (e) {
-        out.textContent = e.message;
+        out.innerHTML = `<div class="pr-result fail">${esc(e.message)}</div>`;
       } finally {
         btn.disabled = false;
         btn.classList.remove('listening');
+        btn.textContent = tries ? '🎤 再读一次' : label;
       }
     };
   });
@@ -448,22 +506,24 @@ async function viewSession(arg) {
       <section class="card goal">🎯 ${esc(L.goal_zh)}</section>
       <section class="card">
         <h2>核心句子</h2>
-        <p class="hint">先听 → 跟读 3 遍 → 遮住日语看中文试着说出来。中文默认隐藏，点击显示。这些句子已自动加入复习卡片。</p>
+        <p class="hint">先听 → 点 🎤 跟读，读错的字会标红，听听自己的录音和标准发音有什么不同，一直练到读对 → 再遮住日语看中文试着说出来。这些句子已自动加入复习卡片。</p>
+        <div class="pass-count">已读对 <b id="pc">0</b> / ${L.phrases.length} 句</div>
         ${L.phrases.map((p) => `<div class="item">${jaBlock({ ...p, note: p.note_zh })}${micButton()}</div>`).join('')}
       </section>
       <section class="card"><h2>语法要点</h2>${gram}</section>`;
-    bindShadowMics(box, (i) => [L.phrases[i].ja, L.phrases[i].reading]);
+    bindShadowMics(box, (i) => [L.phrases[i].ja, L.phrases[i].reading], (n) => ($('#pc', box).textContent = n));
   }
 
   function renderShadow(box, L) {
     box.innerHTML = `
       <section class="card">
         <h2>影子跟读</h2>
-        <p class="hint">方法：① 先听整段，不看文字；② 看文字逐句跟读；③ 合上中文，紧跟着声音同步说（影子跟读）。目标是 80 分以上。</p>
+        <p class="hint">方法：① 先听整段，不看文字；② 逐句跟读，读错的字会标红，每句练到 ✅ 读对；③ 合上中文，紧跟着声音同步说（影子跟读）。</p>
         <div class="row">
           <button class="btn" id="playAll">▶ 播放整段</button>
           <button class="btn ghost" id="slow">🐢 慢速</button>
         </div>
+        <div class="pass-count">已读对 <b id="pc">0</b> / ${L.dialogue.length} 句</div>
         ${L.dialogue.map((l) => `<div class="item line"><span class="spk">${esc(l.speaker)}</span>${jaBlock(l)}${micButton()}</div>`).join('')}
       </section>`;
     let playing = false;
@@ -486,7 +546,7 @@ async function viewSession(arg) {
       playing = false;
       e.target.textContent = '▶ 播放整段';
     };
-    bindShadowMics(box, (i) => [L.dialogue[i].ja, L.dialogue[i].reading]);
+    bindShadowMics(box, (i) => [L.dialogue[i].ja, L.dialogue[i].reading], (n) => ($('#pc', box).textContent = n));
   }
 
   async function renderSummary(box) {
@@ -622,7 +682,7 @@ function renderReview(box, cardsOverride) {
         <div class="test-meta">${i + 1} / ${list.length} · 看中文，用日语说出来</div>
         <div class="srs-front">${esc(c.zh)}</div>
         ${c.note ? `<div class="note">💡 ${esc(c.note)}</div>` : ''}
-        <div class="row center">${sttSupported ? micButton('说出日语') : ''}</div>
+        ${sttSupported ? micButton('说出日语') : ''}
         <div id="back" hidden>${jaBlock(c, { big: true })}</div>
         <button class="btn block" id="show">显示答案</button>
         <div class="grades" hidden>

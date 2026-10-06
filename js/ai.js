@@ -158,6 +158,28 @@ ${transcript}
   return askJSON({ system, messages: [{ role: 'user', content: user }], schema: SUMMARY_SCHEMA, effort: 'medium' });
 }
 
+// ---------- 跟读发音分析 ----------
+const PRON_SCHEMA = obj({
+  correct: { type: 'boolean' },
+  problems: arr(obj({ part: str, issue_zh: str, how_zh: str })),
+  tip_zh: str,
+});
+
+export function pronunciationFeedback({ ja, reading, heard }) {
+  const system = '你是日语发音教练，学生母语是中文。你说话简短、具体、鼓励人。';
+  const user = `目标句：${ja}
+读音：${reading || ja}
+语音识别把学生的跟读识别成（按可信度排序）：
+${heard.map((h, i) => `${i + 1}. ${h}`).join('\n')}
+
+语音识别会把发音“纠正”成最接近的词，所以识别结果和目标句的差异，反映了学生读错、漏读或读得不清楚的地方。请分析：
+- correct：任一识别结果在读音上和目标句完全一致时为 true。只是汉字／假名写法不同（如「私」和「わたし」、「お願い」和「おねがい」）或标点不同，算一致；少读、多读或读错任何一个音（包括长音、促音、拨音、浊音、句末的「ね」「よ」），都算不一致。
+- problems：最多 3 条。part 写目标句里出问题的那几个字（照抄目标句里的写法）；issue_zh 说明听起来像读成了什么、最可能的原因（例如长音太短、促音「っ」没有停顿、拨音「ん」、清浊音混淆、拗音、「つ／す」「ら行」等中国学生常见问题）；how_zh 给一个具体的练习方法。识别结果和目标句基本一致时返回空数组。
+- tip_zh：一句话，下一次跟读最该注意什么。
+不要评价音调（识别结果反映不出音调），不要编造识别结果里看不出来的问题。`;
+  return askJSON({ system, messages: [{ role: 'user', content: user }], schema: PRON_SCHEMA, effort: 'low' });
+}
+
 // ---------- 分级测试中的口语评估 ----------
 const SPEAKING_SCHEMA = obj({ speaking_level: { type: 'integer' }, comment_zh: str });
 
