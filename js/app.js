@@ -1,13 +1,12 @@
 import {
-  LEVELS, PLACEMENT_ITEMS, SPEAKING_QUESTIONS, KANA_GROUPS, TOTAL_WEEKS, DAYS_PER_WEEK,
-  dailySteps, WEEKLY_STEPS,
+  LANGS, LANG_IDS, TOTAL_WEEKS, DAYS_PER_WEEK, dailySteps, WEEKLY_STEPS,
 } from './data.js';
 import {
   S, save, resetAll, exportData, importData, TOTAL_DAYS, unitForWeek, levelForUnit, dayInfo,
-  completeDay, logMinutes, today, streak, addCards, dueCards, gradeCard,
+  completeDay, logMinutes, today, streak, addCards, dueCards, gradeCard, L, switchLang, hasCourse,
 } from './store.js';
 import {
-  speak, listen, recordAttempt, similarity, diffChars, sttSupported, ttsSupported, hasJaVoice, ttsDiagnosis,
+  speak, listen, recordAttempt, similarity, diffChars, sttSupported, ttsSupported, hasVoice, ttsDiagnosis,
   recordModeInfo, resetRecordMode, canSelfRecord, recordSelf, stopSelfRecording, isSelfRecording,
 } from './speech.js';
 import {
@@ -19,23 +18,27 @@ const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const shuffle = (a) => a.map((v) => [Math.random(), v]).sort((x, y) => x[0] - y[0]).map((x) => x[1]);
 const main = () => $('#main');
+// 当前学习语言的 HTML lang 属性（影响字体和浏览器朗读）
+const HL = () => L().htmlLang;
 
 // ---------- 通用组件 ----------
-// 一行日语：原文 + 读音 + 可点开的中文 + 朗读按钮
+// 一行目标语言的句子：原文 + 读音 + 可点开的中文 + 朗读按钮
 function jaBlock({ ja, reading, zh, note }, { big = false, showZh = false } = {}) {
   const showReading = S().settings.showReading && reading && reading !== ja;
   return `<div class="ja-block ${big ? 'big' : ''}">
-    <div class="ja-row"><button class="say" data-say="${esc(ja)}" aria-label="朗读">🔊</button><span class="ja" lang="ja" data-sent="${esc(ja)}">${tappable(ja)}</span></div>
-    ${showReading ? `<div class="reading" lang="ja">${esc(reading)}</div>` : ''}
+    <div class="ja-row"><button class="say" data-say="${esc(ja)}" aria-label="朗读">🔊</button><span class="ja" lang="${HL()}" data-sent="${esc(ja)}">${tappable(ja)}</span></div>
+    ${showReading ? `<div class="reading" lang="${HL()}">${esc(reading)}</div>` : ''}
     ${zh ? `<div class="zh ${showZh ? 'shown' : ''}" data-reveal>${esc(zh)}</div>` : ''}
     ${note ? `<div class="note">💡 ${esc(note)}</div>` : ''}
   </div>`;
 }
 
-// 把日语句子切成可点击的词（浏览器自带的日语分词）
-const segmenter = window.Intl?.Segmenter ? new Intl.Segmenter('ja', { granularity: 'word' }) : null;
+// 把句子切成可点击的词（浏览器自带的分词，按当前语言）
+const segmenters = {};
 function tappable(text) {
-  if (!segmenter) return esc(text);
+  if (!window.Intl?.Segmenter) return esc(text);
+  const lang = HL();
+  const segmenter = segmenters[lang] || (segmenters[lang] = new Intl.Segmenter(lang, { granularity: 'word' }));
   return [...segmenter.segment(text)]
     .map((s) => (s.isWordLike ? `<span class="w" data-w="${esc(s.segment)}">${esc(s.segment)}</span>` : esc(s.segment)))
     .join('');
@@ -60,11 +63,11 @@ function closeWordSheet() {
 async function showWord(word, sentence) {
   const el = wordSheet();
   el.hidden = false;
-  // 查过的词用平假名读音朗读，避免汉字单独出现时被读错
+  // 日语查过的词用平假名读音朗读，避免汉字单独出现时被读错
   const cached = (S().dict || {})[`${word}|${sentence}`];
-  speak(cached?.reading || word);
+  speak(L().id === 'ja' && cached?.reading ? cached.reading : word);
   const head = `<button class="ws-close" data-wsclose aria-label="关闭">✕</button>
-    <div class="ws-word"><span lang="ja">${esc(word)}</span><button class="say" data-say="${esc(word)}">🔊</button></div>`;
+    <div class="ws-word"><span lang="${HL()}">${esc(word)}</span><button class="say" data-say="${esc(word)}">🔊</button></div>`;
   if (!hasKey()) {
     el.innerHTML = `${head}<p class="hint">填写 Claude API Key 后，可以在这里看到这个词的读音和解释。</p>`;
     return;
@@ -85,12 +88,12 @@ async function showWord(word, sentence) {
     if (el.dataset.word !== key) return; // 查询期间又点了别的词
   }
   el.innerHTML = `${head}
-    <div class="ws-reading" lang="ja">${esc(info.reading)}${info.dictionary_form && info.dictionary_form !== word ? `　原形：${esc(info.dictionary_form)}` : ''}</div>
+    <div class="ws-reading" lang="${HL()}">${esc(info.reading)}${info.dictionary_form && info.dictionary_form !== word ? `　原形：${esc(info.dictionary_form)}` : ''}</div>
     <div class="ws-meaning"><span class="ws-pos">${esc(info.pos_zh)}</span>${esc(info.meaning_zh)}</div>
     ${info.usage_zh ? `<p>${esc(info.usage_zh)}</p>` : ''}
     ${info.kanji_zh ? `<p class="ws-kanji">🈶 ${esc(info.kanji_zh)}</p>` : ''}
     <button class="btn sm" data-wsadd>＋ 加入复习卡片</button>`;
-  $('[data-say]', el).dataset.say = info.reading || word;
+  if (L().id === 'ja') $('[data-say]', el).dataset.say = info.reading || word;
   $('[data-wsadd]', el).onclick = (e) => {
     const form = info.dictionary_form || word;
     const n = addCards([{ ja: form, reading: info.reading, zh: info.meaning_zh, note: `出自：${sentence}` }], 'word');
@@ -149,7 +152,7 @@ function bindSelfRecord(box, getJa) {
 }
 
 // 绑定跟读练习：录音 + 识别 → 打分、标出读错的字、回放自己的录音、AI 分析，直到读对为止
-// getTargets(i) 返回 [日语原文, 平假名读音]；onProgress(passedCount) 在读对一句时调用
+// getTargets(i) 返回 [原文, 读音（假名／拼音）]；onProgress(passedCount) 在读对一句时调用
 function bindShadowMics(root, getTargets, onProgress) {
   const passed = new Set();
   $$('[data-mic]', root).forEach((btn, i) => {
@@ -191,11 +194,11 @@ function bindShadowMics(root, getTargets, onProgress) {
           out.innerHTML = `
             <div class="pr-result ${st}">
               <div class="pr-head"><span class="score ${ok ? 's3' : st === 'checking' ? 's2' : 's1'}">${score}%</span><span>第 ${tries} 次 · ${head}</span></div>
-              ${exact ? '' : `<div class="pr-diff" lang="ja">${diff.map((d) => (d.ok ? esc(d.c) : `<mark>${esc(d.c)}</mark>`)).join('')}</div>
+              ${exact ? '' : `<div class="pr-diff" lang="${HL()}">${diff.map((d) => (d.ok ? esc(d.c) : `<mark>${esc(d.c)}</mark>`)).join('')}</div>
               <div class="pr-legend">${ok && selfPassed ? '你确认了读对（语音识别可能听错了）。' : ok && ai ? 'AI 判断：标红处只是汉字和假名的写法不同，发音是对的。' : '标红的是没读出来或读错的部分'}</div>`}
-              <div class="pr-heard">识别到：<span lang="ja">${esc(alts[0])}</span></div>
+              <div class="pr-heard">识别到：<span lang="${HL()}">${esc(alts[0])}</span></div>
               ${ai && (ai.problems.length || ai.tip_zh) ? `<div class="pr-ai">
-                ${ai.problems.map((p) => `<div class="pr-problem"><b lang="ja">${esc(p.part)}</b>：${esc(p.issue_zh)}<div class="how">👉 ${esc(p.how_zh)}</div></div>`).join('')}
+                ${ai.problems.map((p) => `<div class="pr-problem"><b lang="${HL()}">${esc(p.part)}</b>：${esc(p.issue_zh)}<div class="how">👉 ${esc(p.how_zh)}</div></div>`).join('')}
                 ${ai.tip_zh ? `<div class="pr-tip">💡 ${esc(ai.tip_zh)}</div>` : ''}</div>` : ''}
               <div class="pr-actions">
                 ${myAudio ? '<button class="btn sm" data-mine>▶ 我的录音</button>' : ''}
@@ -273,12 +276,30 @@ function router() {
     location.hash = '#/welcome';
     return;
   }
+  document.title = L().appTitle;
   $$('.tabbar a').forEach((a) => a.classList.toggle('active', a.dataset.tab === (name || 'home')));
   document.body.classList.toggle('no-tabs', ['welcome', 'test', 'session'].includes(name));
   window.scrollTo(0, 0);
   (routes[name] || viewHome)(arg);
 }
 window.addEventListener('hashchange', router);
+
+// ---------- 语言切换 ----------
+function langSwitcher() {
+  return `<div class="lang-switch">${LANG_IDS.map((id) => `<button class="${id === L().id ? 'active' : ''}" data-lang="${id}">${LANGS[id].flag} ${esc(LANGS[id].name)}</button>`).join('')}</div>`;
+}
+// 切换后：这种语言学过就回首页，没学过就去欢迎页做水平测试。before 在切换前调用（如保存已填的内容）
+function bindLangSwitcher(before = () => {}) {
+  $$('[data-lang]').forEach((b) => (b.onclick = () => {
+    const id = b.dataset.lang;
+    if (id === L().id) return;
+    before();
+    switchLang(id);
+    const target = hasCourse(id) ? '#/' : '#/welcome';
+    if (location.hash === target || (target === '#/' && !location.hash)) router();
+    else location.hash = target;
+  }));
+}
 
 // ---------- 首页 ----------
 function viewHome() {
@@ -292,8 +313,9 @@ function viewHome() {
   const todayMin = st.log[today()] || 0;
   const scores = Object.entries(p.weekScores);
   main().innerHTML = `
+    ${langSwitcher()}
     <header class="hero">
-      <div class="level-badge">当前水平 · ${esc(LEVELS[info ? info.level : 5].name)}</div>
+      <div class="level-badge">${L().flag} ${esc(L().name)} · 当前水平 · ${esc(L().levels[info ? info.level : 5].name)}</div>
       <h1>${finished ? '🎉 26 周课程完成！' : `第 ${info.week} 周 · 第 ${info.dow} 天`}</h1>
       ${info ? `<p class="unit-title">${esc(info.unit.title)}${info.weekly ? ' · 周复盘与口语测评' : ''}</p>` : '<p>建议重新做一次水平测试，看看半年的进步。</p>'}
     </header>
@@ -313,22 +335,29 @@ function viewHome() {
     </section>` : `<section class="card"><a class="btn primary block" href="#/test">重新测试水平</a></section>`}
     <section class="card">
       <h2>目标</h2>
-      <p>${esc(LEVELS[st.profile.level].target)}</p>
+      <p>${esc(L().levels[st.profile.level].target)}</p>
       ${scores.length ? `<h3>每周口语测评</h3><div class="score-bars">${scores.map(([w, s]) => `<div title="第${w}周：${s}/5"><i style="height:${s * 20}%"></i><span>${w}</span></div>`).join('')}</div>` : ''}
     </section>
     <section class="quick">
       <a class="card link" href="#/review">🔁 复习卡片<small>${due} 张待复习</small></a>
       <a class="card link" href="#/chat">💬 自由对话<small>随时和 AI 聊天</small></a>
     </section>`;
+  bindLangSwitcher();
 }
 
 // ---------- 欢迎页 ----------
 function viewWelcome() {
+  const { name } = L();
   main().innerHTML = `
     <section class="welcome">
-      <div class="logo">日</div>
-      <h1>日语口语教练</h1>
-      <p class="lead">每天 1 小时，26 周，用最高效的方法练到能开口说日语。</p>
+      <div class="logo">${L().flag}</div>
+      <h1>${esc(L().appTitle)}</h1>
+      <p class="lead">每天 1 小时，26 周，用最高效的方法练到能开口说${esc(name)}。</p>
+      <div class="card">
+        <h2>想学哪种语言？</h2>
+        ${langSwitcher()}
+        <p class="hint">每种语言有自己的水平测试、课程和复习卡片，随时可以在首页切换。</p>
+      </div>
       <div class="card">
         <h2>它怎么帮你</h2>
         <ul class="method">
@@ -336,7 +365,7 @@ function viewWelcome() {
           <li><b>整句学习</b>：每天 8 个高频句子，直接学能说出口的整句。</li>
           <li><b>影子跟读</b>：跟着朗读逐句模仿，语音识别给发音打分。</li>
           <li><b>AI 情景对话</b>：每天和 AI 角色扮演，实时纠错，这是提升口语最关键的一环。</li>
-          <li><b>间隔复习</b>：看中文说日语，按遗忘曲线安排复习，记住你说错过的句子。</li>
+          <li><b>间隔复习</b>：看中文说${esc(name)}，按遗忘曲线安排复习，记住你说错过的句子。</li>
           <li><b>每周测评</b>：第 7 天做口语测评，跟踪进步并调整节奏。</li>
         </ul>
       </div>
@@ -352,6 +381,11 @@ function viewWelcome() {
     save();
     location.hash = '#/test';
   };
+  // 欢迎页上切换语言前，先保存已经填好的 Key
+  bindLangSwitcher(() => {
+    S().settings.apiKey = $('#key').value.trim();
+    save();
+  });
 }
 
 // ---------- 分级测试 ----------
@@ -362,22 +396,20 @@ function viewTest() {
     main().innerHTML = `
       <section class="card">
         <h2>水平测试 · 1/3 基本情况</h2>
-        <p>你现在认识日语假名吗？</p>
+        <p>${esc(L().selfCheck.q)}</p>
         <div class="choices">
-          <button class="btn" data-k="0">完全不会，零基础</button>
-          <button class="btn" data-k="1">会平假名，片假名不熟</button>
-          <button class="btn" data-k="2">平假名、片假名都会</button>
+          ${L().selfCheck.options.map((o, i) => `<button class="btn" data-k="${i}">${esc(o.label)}</button>`).join('')}
         </div>
         <p class="hint">接下来的笔试会自动调整难度，遇到不会的题请选「不知道」，不要猜，这样结果更准。</p>
       </section>`;
     $$('[data-k]').forEach((b) => (b.onclick = () => {
-      if (b.dataset.k === '0') return finish(0, null, '');
+      if (L().selfCheck.options[+b.dataset.k].skip) return finish(0, null, '');
       nextBlock();
     }));
   }
 
   function nextBlock() {
-    t.block = shuffle(PLACEMENT_ITEMS.filter((x) => x.lv === t.lv)).slice(0, 4);
+    t.block = shuffle(L().placement.filter((x) => x.lv === t.lv)).slice(0, 4);
     t.idx = 0;
     t.correct = 0;
     showItem();
@@ -391,9 +423,9 @@ function viewTest() {
         <h2>水平测试 · 2/3 笔试与听力</h2>
         <div class="test-meta">难度 ${t.lv}/5 · 第 ${qNo} 题</div>
         ${it.type === 'listen' ? `<button class="btn big-say" data-say="${esc(it.audio)}">🔊 播放语音</button><button class="diag" data-diag>听不到声音？</button>` : ''}
-        <p class="question" lang="ja">${esc(it.q)}</p>
+        <p class="question" lang="${HL()}">${esc(it.q)}</p>
         <div class="choices">
-          ${it.options.map((o, i) => `<button class="btn" data-i="${i}" lang="ja">${esc(o)}</button>`).join('')}
+          ${it.options.map((o, i) => `<button class="btn" data-i="${i}" lang="${HL()}">${esc(o)}</button>`).join('')}
           <button class="btn ghost" data-i="-1">不知道</button>
         </div>
       </section>`;
@@ -421,16 +453,16 @@ function viewTest() {
   }
 
   function showSpeak(i) {
-    if (i >= SPEAKING_QUESTIONS.length) return evalSpeak();
-    const q = SPEAKING_QUESTIONS[i];
+    if (i >= L().speaking.length) return evalSpeak();
+    const q = L().speaking[i];
     main().innerHTML = `
       <section class="card">
         <h2>水平测试 · 3/3 口语</h2>
-        <div class="test-meta">第 ${i + 1} / ${SPEAKING_QUESTIONS.length} 题 · 听问题，用日语回答</div>
+        <div class="test-meta">第 ${i + 1} / ${L().speaking.length} 题 · 听问题，用${esc(L().name)}回答</div>
         <button class="btn big-say" data-say="${esc(q)}">🔊 再听一次</button><button class="diag" data-diag>听不到声音？</button>
-        <p class="question zh" data-reveal lang="ja">${esc(q)}<small>（点击显示文字）</small></p>
+        <p class="question zh" data-reveal lang="${HL()}">${esc(q)}<small>（点击显示文字）</small></p>
         ${sttSupported ? '<button class="mic big" id="rec">🎤 按下后开始说</button>' : ''}
-        <textarea id="ans" rows="2" placeholder="识别结果会出现在这里，也可以直接用日语输入" lang="ja"></textarea>
+        <textarea id="ans" rows="2" placeholder="识别结果会出现在这里，也可以直接打字输入" lang="${HL()}"></textarea>
         <div class="row">
           <button class="btn ghost" id="skip">听不懂 / 跳过</button>
           <button class="btn primary" id="next">下一题</button>
@@ -473,17 +505,17 @@ function viewTest() {
     main().innerHTML = `
       <section class="card result">
         <h2>测试结果</h2>
-        <div class="result-level">${esc(LEVELS[level].name)}</div>
-        <p>${esc(LEVELS[level].desc)}</p>
+        <div class="result-level">${esc(L().levels[level].name)}</div>
+        <p>${esc(L().levels[level].desc)}</p>
         <div class="stats two">
-          <div><b>${esc(LEVELS[written].name)}</b><span>笔试/听力</span></div>
-          <div><b>${spk == null ? '—' : esc(LEVELS[spk].name)}</b><span>口语</span></div>
+          <div><b>${esc(L().levels[written].name)}</b><span>笔试/听力</span></div>
+          <div><b>${spk == null ? '—' : esc(L().levels[spk].name)}</b><span>口语</span></div>
         </div>
         ${comment ? `<p class="comment">${esc(comment)}</p>` : ''}
         <h3>半年后的现实目标</h3>
-        <p>${esc(LEVELS[level].target)}</p>
+        <p>${esc(L().levels[level].target)}</p>
         <label class="adjust">觉得不准？手动选择起点：
-          <select id="lv">${LEVELS.map((l) => `<option value="${l.id}" ${l.id === level ? 'selected' : ''}>${esc(l.name)}（${esc(l.desc)}）</option>`).join('')}</select>
+          <select id="lv">${L().levels.map((l) => `<option value="${l.id}" ${l.id === level ? 'selected' : ''}>${esc(l.name)}（${esc(l.desc)}）</option>`).join('')}</select>
         </label>
         <button class="btn primary block" id="start">生成我的 26 周课程</button>
       </section>`;
@@ -522,7 +554,7 @@ function viewPlan() {
     const sc = p.weekScores[w];
     weeks.push(`
       <div class="week ${w === curWeek ? 'cur' : ''} ${w < curWeek ? 'past' : ''}">
-        <div class="week-head"><span class="wk">第 ${w} 周</span><span class="lv">${esc(LEVELS[lv].name)}</span>${sc ? `<span class="sc">测评 ${sc}/5</span>` : ''}</div>
+        <div class="week-head"><span class="wk">第 ${w} 周</span><span class="lv">${esc(L().levels[lv].name)}</span>${sc ? `<span class="sc">测评 ${sc}/5</span>` : ''}</div>
         <div class="week-title">${esc(u.title)}</div>
         <div class="week-grammar">${u.grammar.map(esc).join(' · ')}</div>
         <div class="days">${days.join('')}</div>
@@ -531,7 +563,7 @@ function viewPlan() {
   main().innerHTML = `
     <section class="card">
       <h2>你的 26 周课程</h2>
-      <p class="hint">起点：${esc(LEVELS[S().profile.level].name)}。每周 6 节课 + 1 次口语测评，每节 60 分钟。越往后，AI 对话的时间占比越高。错过一天不会跳课，进度按完成的天数推进。</p>
+      <p class="hint">起点：${esc(L().levels[S().profile.level].name)}。每周 6 节课 + 1 次口语测评，每节 60 分钟。越往后，AI 对话的时间占比越高。错过一天不会跳课，进度按完成的天数推进。</p>
     </section>
     ${weeks.join('')}`;
   $('.week.cur')?.scrollIntoView({ block: 'center' });
@@ -636,7 +668,7 @@ async function viewSession(arg) {
       <section class="card goal">🎯 ${esc(L.goal_zh)}</section>
       <section class="card">
         <h2>核心句子</h2>
-        <p class="hint">先听 → 点 🎤 跟读，读错的字会标红，一直练到读对；点 🎙 录一遍听听，会先放你的录音再放标准发音，对比哪里不一样 → 再遮住日语看中文试着说出来。不认识的词，直接点它就能听读音、看解释。这些句子已自动加入复习卡片。</p>
+        <p class="hint">先听 → 点 🎤 跟读，读错的字会标红，一直练到读对；点 🎙 录一遍听听，会先放你的录音再放标准发音，对比哪里不一样 → 再遮住原文看中文试着说出来。不认识的词，直接点它就能听读音、看解释。这些句子已自动加入复习卡片。</p>
         <div class="pass-count">已读对 <b id="pc">0</b> / ${L.phrases.length} 句</div>
         ${L.phrases.map((p) => `<div class="item">${jaBlock({ ...p, note: p.note_zh })}${micButton()}</div>`).join('')}
       </section>
@@ -718,7 +750,7 @@ async function viewSession(arg) {
         ${advice ? `<p class="comment">${esc(advice)}</p>` : ''}
         <h3>做得好的</h3><ul>${s.strengths_zh.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>
         <h3>需要改正的</h3>
-        ${s.mistakes.length ? s.mistakes.map((m) => `<div class="mistake"><div class="wrong" lang="ja">✗ ${esc(m.wrong)}</div>${jaBlock({ ja: m.correct_ja, reading: m.reading, zh: m.explanation_zh }, { showZh: true })}</div>`).join('') : '<p>没有明显错误 👍</p>'}
+        ${s.mistakes.length ? s.mistakes.map((m) => `<div class="mistake"><div class="wrong" lang="${HL()}">✗ ${esc(m.wrong)}</div>${jaBlock({ ja: m.correct_ja, reading: m.reading, zh: m.explanation_zh }, { showZh: true })}</div>`).join('') : '<p>没有明显错误 👍</p>'}
         <h3>下次重点</h3><p>${esc(s.next_focus_zh)}</p>
         <p class="hint">已把 ${s.addedCards ?? 0} 个句子加入复习卡片。</p>
       </section>`;
@@ -752,16 +784,16 @@ function prefetchNext() {
 
 // ---------- 假名训练 ----------
 function renderKana(box, info) {
-  const groups = KANA_GROUPS[info.unit.kana];
+  const groups = L().kana[info.unit.kana];
   const todays = groups[Math.min(info.dow - 1, groups.length - 1)];
   const learned = groups.slice(0, info.dow).flat();
   // 片假名周也混入平假名复习
-  const pool = info.unit.kana === 'katakana' ? [...learned, ...KANA_GROUPS.hiragana.flat()] : learned;
+  const pool = info.unit.kana === 'katakana' ? [...learned, ...L().kana.hiragana.flat()] : learned;
   box.innerHTML = `
     <section class="card">
       <h2>今天的${info.unit.kana === 'hiragana' ? '平假名' : '片假名'}</h2>
       <p class="hint">点击每个假名听发音，边听边在纸上写 3 遍。</p>
-      <div class="kana-grid">${todays.map((k) => `<button class="kana" data-say="${esc(k.k)}"><b lang="ja">${esc(k.k)}</b><small>${esc(k.r)}</small></button>`).join('')}</div>
+      <div class="kana-grid">${todays.map((k) => `<button class="kana" data-say="${esc(k.k)}"><b lang="${HL()}">${esc(k.k)}</b><small>${esc(k.r)}</small></button>`).join('')}</div>
     </section>
     <section class="card" id="quiz"></section>`;
   let n = 0, right = 0;
@@ -778,7 +810,7 @@ function renderKana(box, info) {
     const opts = shuffle([target, ...shuffle(pool.filter((x) => x.r !== target.r)).slice(0, 3)]);
     $('#quiz').innerHTML = `
       <h2>快速认读 ${n + 1}/${total}</h2>
-      <div class="kana-q" lang="ja">${esc(target.k)}</div>
+      <div class="kana-q" lang="${HL()}">${esc(target.k)}</div>
       <div class="choices grid4">${opts.map((o) => `<button class="btn" data-r="${esc(o.r)}">${esc(o.r)}</button>`).join('')}</div>`;
     $$('#quiz [data-r]').forEach((b) => (b.onclick = async () => {
       const ok = b.dataset.r === target.r;
@@ -809,10 +841,10 @@ function renderReview(box, cardsOverride) {
     const c = list[i];
     box.innerHTML = `
       <section class="card srs">
-        <div class="test-meta">${i + 1} / ${list.length} · 看中文，用日语说出来</div>
+        <div class="test-meta">${i + 1} / ${list.length} · ${L().id === 'zh' ? '看提示，把这句话说出来' : `看中文，用${esc(L().name)}说出来`}</div>
         <div class="srs-front">${esc(c.zh)}</div>
         ${c.note ? `<div class="note">💡 ${esc(c.note)}</div>` : ''}
-        ${sttSupported ? micButton('说出日语') : ''}
+        ${sttSupported ? micButton(`说出${L().name}`) : ''}
         <div id="back" hidden>${jaBlock(c, { big: true })}</div>
         <button class="btn block" id="show">显示答案</button>
         <div class="grades" hidden>
@@ -858,7 +890,7 @@ function renderChat(box, { system, opening, ss }) {
     <div class="chat" id="chatlog"></div>
     <div class="chat-input">
       ${sttSupported ? '<button class="mic big" id="talk">🎤</button>' : ''}
-      <textarea id="msg" rows="1" placeholder="说日语或输入日语（不会说可以打中文问）" lang="ja"></textarea>
+      <textarea id="msg" rows="1" placeholder="${L().id === 'zh' ? '说中文或打字输入' : `说${esc(L().name)}或输入${esc(L().name)}（不会说可以打中文问）`}" lang="${HL()}"></textarea>
       <button class="btn primary" id="send">发送</button>
     </div>
     <div class="row"><button class="btn ghost" id="hint">💡 提示</button><button class="btn ghost" id="restart">↺ 重新开始</button></div>`;
@@ -875,8 +907,8 @@ function renderChat(box, { system, opening, ss }) {
       const u = prev[prev.length - 1];
       if (u) {
         u.insertAdjacentHTML('beforeend', `<div class="fix">
-          ${t.correction?.has_error ? `<div>✏️ <span lang="ja">${esc(t.correction.corrected_ja)}</span> <button class="say sm" data-say="${esc(t.correction.corrected_ja)}">🔊</button></div><div class="why">${esc(t.correction.explanation_zh)}</div>` : ''}
-          ${t.better_ja ? `<div>✨ 更地道：<span lang="ja">${esc(t.better_ja)}</span> <button class="say sm" data-say="${esc(t.better_ja)}">🔊</button></div>` : ''}
+          ${t.correction?.has_error ? `<div>✏️ <span lang="${HL()}">${esc(t.correction.corrected_ja)}</span> <button class="say sm" data-say="${esc(t.correction.corrected_ja)}">🔊</button></div><div class="why">${esc(t.correction.explanation_zh)}</div>` : ''}
+          ${t.better_ja ? `<div>✨ 更地道：<span lang="${HL()}">${esc(t.better_ja)}</span> <button class="say sm" data-say="${esc(t.better_ja)}">🔊</button></div>` : ''}
         </div>`);
       }
     }
@@ -885,7 +917,7 @@ function renderChat(box, { system, opening, ss }) {
     speak(t.reply_ja);
   }
   function addUser(text) {
-    log.insertAdjacentHTML('beforeend', `<div class="msg user"><div lang="ja">${esc(text)}</div></div>`);
+    log.insertAdjacentHTML('beforeend', `<div class="msg user"><div lang="${HL()}">${esc(text)}</div></div>`);
   }
 
   // 恢复已有对话（在步骤之间切换时）
@@ -981,7 +1013,7 @@ function viewChat() {
   main().innerHTML = `
     <section class="card">
       <h2>💬 自由对话</h2>
-      <p class="hint">想聊什么都行。AI 会按你当前水平（${esc(LEVELS[level].name)}）说话，并纠正你的错误。</p>
+      <p class="hint">想聊什么都行。AI 会按你当前水平（${esc(L().levels[level].name)}）说话，并纠正你的错误。</p>
       <input id="topic" placeholder="话题（可选），如：我喜欢的动漫、明天的面试…">
       <button class="btn primary block" id="go">开始聊天</button>
     </section>
@@ -1002,7 +1034,7 @@ function viewChat() {
         const s = await summarize({ level, transcript: transcriptText(ss.transcript), weekly: false, unit: { title: topic || '自由对话' } });
         const n = addCards([...s.mistakes.map((m) => ({ ja: m.correct_ja, reading: m.reading, zh: m.explanation_zh, note: `之前说成：${m.wrong}` })), ...s.new_cards], 'chat');
         $('#sumbox').innerHTML = `<p>${'★'.repeat(s.score)}${'☆'.repeat(5 - s.score)} ${esc(s.summary_zh)}</p>
-          ${s.mistakes.map((m) => `<div class="mistake"><div class="wrong" lang="ja">✗ ${esc(m.wrong)}</div>${jaBlock({ ja: m.correct_ja, reading: m.reading, zh: m.explanation_zh }, { showZh: true })}</div>`).join('')}
+          ${s.mistakes.map((m) => `<div class="mistake"><div class="wrong" lang="${HL()}">✗ ${esc(m.wrong)}</div>${jaBlock({ ja: m.correct_ja, reading: m.reading, zh: m.explanation_zh }, { showZh: true })}</div>`).join('')}
           <p class="hint">已加入 ${n} 张复习卡片。</p>`;
       } catch (e) {
         $('#sumbox').innerHTML = errorBox(e.message);
@@ -1030,10 +1062,15 @@ function viewSettings() {
       <h2>语音</h2>
       <label>朗读速度 <span id="rv">${st.ttsRate}</span><input type="range" id="rate" min="0.5" max="1.2" step="0.05" value="${st.ttsRate}"></label>
       <div class="row"><button class="btn" id="test">🔊 试听</button><button class="btn ghost" data-diag>听不到声音？</button></div>
-      <label class="check"><input type="checkbox" id="reading" ${st.showReading ? 'checked' : ''}> 显示平假名读音</label>
-      <p class="hint">朗读：${ttsSupported ? (hasJaVoice() ? '✅ 已找到日语语音' : '⚠️ 没找到日语语音，点「听不到声音？」查看解决办法') : '❌ 不支持'}<br>
+      <label class="check"><input type="checkbox" id="reading" ${st.showReading ? 'checked' : ''}> 显示${esc(L().readingLabel)}</label>
+      <p class="hint">朗读：${ttsSupported ? (hasVoice() ? `✅ 已找到${esc(L().name)}语音` : `⚠️ 没找到${esc(L().name)}语音，点「听不到声音？」查看解决办法`) : '❌ 不支持'}<br>
       语音识别：${sttSupported ? '✅ 支持' : '❌ 当前浏览器不支持（可打字代替）。推荐 Android 用 Chrome，iPhone 用 Safari'}<br>
       跟读录音：<span id="recmode">${esc(recordModeInfo())}</span> <button class="selfpass inline" id="recreset">重新检测</button></p>
+    </section>
+    <section class="card">
+      <h2>学习语言</h2>
+      ${langSwitcher()}
+      <p class="hint">每种语言的水平测试、课程进度和复习卡片分开保存，切换不会丢失进度。</p>
     </section>
     <section class="card">
       <h2>数据</h2>
@@ -1047,7 +1084,8 @@ function viewSettings() {
     </section>
     <button class="btn primary block" id="save">保存设置</button>`;
   $('#rate').oninput = (e) => ($('#rv').textContent = e.target.value);
-  $('#test').onclick = () => speak('こんにちは。一緒に日本語を練習しましょう。', +$('#rate').value);
+  bindLangSwitcher();
+  $('#test').onclick = () => speak(L().sample, +$('#rate').value);
   $('#recreset').onclick = () => {
     resetRecordMode();
     $('#recmode').textContent = recordModeInfo();

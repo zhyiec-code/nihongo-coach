@@ -1,7 +1,6 @@
 // Claude API：生成课程、情景对话陪练、纠错总结、口语评估
 import Anthropic from 'https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk/+esm';
-import { S } from './store.js';
-import { LEVELS } from './data.js';
+import { S, L } from './store.js';
 
 export const hasKey = () => !!S().settings.apiKey;
 
@@ -49,15 +48,16 @@ const obj = (props) => ({ type: 'object', properties: props, required: Object.ke
 const str = { type: 'string' };
 const arr = (items) => ({ type: 'array', items });
 
-const LEVEL_GUIDE = [
-  '零基础：只用最基础的问候语和「〜です」「〜は〜です」句型，每句不超过 12 个假名，全部配平假名读音。',
-  '入门：只用 N5 词汇和 です／ます 体，短句，避免复杂汉字。',
-  'N5：N5 词汇 + 少量 N4 语法，です／ます 体为主，句子简短清楚。',
-  'N4：N4 词汇和语法，可以混用普通体，自然但不过快。',
-  'N3：N3 水平，自然口语，可以用常见惯用说法和适量敬语。',
-  'N2+：接近母语者的自然口语，包含敬语、惯用语和更抽象的话题。',
-];
-export const levelGuide = (lv) => `学习者当前水平：${LEVELS[lv].name}。${LEVEL_GUIDE[lv]}`;
+export const levelGuide = (lv) => `学习者当前水平：${L().levels[lv].name}。${L().ai.levelGuide[lv]}`;
+
+// 各个 JSON 字段沿用了最初只有日语时的命名（ja、reply_ja 等），学其他语言时要告诉模型这些字段装的是什么
+function fieldNote() {
+  const { id, name, ai } = L();
+  const note = id === 'ja' ? '' : `注意：字段名里的 “ja”（如 ja、reply_ja、corrected_ja）只是历史命名，内容一律写${name}，不是日语。
+`;
+  return `${note}${ai.readingRule}
+${ai.glossRule}`;
+}
 
 // ---------- 每日课程 ----------
 const LESSON_SCHEMA = obj({
@@ -70,12 +70,13 @@ const LESSON_SCHEMA = obj({
 
 export async function generateLesson(info, previousTitles = []) {
   const { unit, dow, level } = info;
-  const system = `你是一位经验丰富的日语口语教练，学生是以中文为母语的成年人，目标是半年内能用日语基本流利地对话。
+  const { name, ai } = L();
+  const system = `你是一位经验丰富的${name}口语教练，学生是${ai.learner}，目标是${ai.goal}。
 你的教学原则：
 - 只教在真实对话中高频使用的表达，优先教“整句”而不是孤立单词，方便学生直接开口。
 - 内容略高于学生当前水平（i+1），新语法控制在 1–2 个。
-- 所有中文说明简洁、具体，指出中国人容易犯的错误（如汉字词的意思差异、助词误用）。
-- reading 字段用平假名写出整句读音（不要罗马字）。
+- 所有说明用中文，简洁、具体，${ai.teachTips}
+${fieldNote()}
 ${levelGuide(level)}`;
   const user = `请为第 ${dow} 天（每周 6 节课，这是本周第 ${dow} 节）编写一节 60 分钟口语课的材料。
 本周单元：「${unit.title}」
@@ -104,11 +105,13 @@ const TURN_SCHEMA = obj({
 });
 
 export function chatSystem({ level, roleplay, exam }) {
-  const base = `你是一位耐心、友好的日语会话陪练，学生母语是中文。${levelGuide(level)}
+  const { name, ai } = L();
+  const base = `你是一位${ai.chatPersona}，学生是${ai.learner}。${levelGuide(level)}
+${fieldNote()}
 每一轮你要：
-1. reply_ja：用日语自然地回应学生并推进对话（1–3 句，结尾通常抛出一个问题让学生继续说）。严格控制难度在学生水平附近。
-2. reply_reading：reply_ja 的平假名读音；reply_zh：中文翻译。
-3. correction：检查学生上一句日语。有语法、助词、用词或礼貌程度错误时 has_error=true，给出改正后的整句 corrected_ja 和简短中文解释；没有错误时 has_error=false，其余字段留空字符串。学生用中文或说“わかりません”时，不算错误，而是在 explanation_zh 里教他这句该怎么用日语说。
+1. reply_ja：用${name}自然地回应学生并推进对话（1–3 句，结尾通常抛出一个问题让学生继续说）。严格控制难度在学生水平附近。
+2. reply_reading：reply_ja 的读音（按上面 reading 的规则）；reply_zh：按上面 zh 的规则。
+3. correction：检查学生上一句${name}。有${ai.correctionScope}错误时 has_error=true，给出改正后的整句 corrected_ja 和简短中文解释；没有错误时 has_error=false，其余字段留空字符串。学生用别的语言说，或说不会的时候，不算错误，而是在 explanation_zh 里教他这句该怎么用${name}说。
 4. better_ja：如果学生的句子虽然没错但不够自然，给出更地道的说法；否则留空。
 5. hint_zh：用中文提示学生下一句可以怎么回答（给出关键词，不要给完整答案）。
 6. finished：对话目标全部完成且自然结束时为 true。
@@ -143,7 +146,9 @@ const SUMMARY_SCHEMA = obj({
 });
 
 export function summarize({ level, transcript, weekly, unit }) {
-  const system = `你是日语口语教练，负责在对话练习后给学生做复盘。学生母语为中文。${levelGuide(level)}`;
+  const { name, ai } = L();
+  const system = `你是${name}口语教练，负责在对话练习后给学生做复盘，说明用中文。学生是${ai.learner}。${levelGuide(level)}
+${fieldNote()}`;
   const user = `下面是学生刚才的${weekly ? '周口语测评' : '情景对话练习'}记录（单元：「${unit.title}」）。
 
 ${transcript}
@@ -166,17 +171,18 @@ const PRON_SCHEMA = obj({
 });
 
 export function pronunciationFeedback({ ja, reading, heard }) {
-  const system = '你是日语发音教练，学生母语是中文。你说话简短、具体、鼓励人。';
+  const { name, ai } = L();
+  const system = `你是${name}发音教练，学生是${ai.learner}。你用中文说明，说话简短、具体、鼓励人。`;
   const user = `目标句：${ja}
 读音：${reading || ja}
 语音识别把学生的跟读识别成（按可信度排序）：
 ${heard.map((h, i) => `${i + 1}. ${h}`).join('\n')}
 
 语音识别会把发音“纠正”成最接近的词，所以识别结果和目标句的差异，反映了学生读错、漏读或读得不清楚的地方。请分析：
-- correct：任一识别结果在读音上和目标句完全一致时为 true。只是汉字／假名写法不同（如「私」和「わたし」、「お願い」和「おねがい」）或标点不同，算一致；少读、多读或读错任何一个音（包括长音、促音、拨音、浊音、句末的「ね」「よ」），都算不一致。
-- problems：最多 3 条。part 写目标句里出问题的那几个字（照抄目标句里的写法）；issue_zh 说明听起来像读成了什么、最可能的原因（例如长音太短、促音「っ」没有停顿、拨音「ん」、清浊音混淆、拗音、「つ／す」「ら行」等中国学生常见问题）；how_zh 给一个具体的练习方法。识别结果和目标句基本一致时返回空数组。
+- correct：任一识别结果在读音上和目标句完全一致时为 true。${ai.sameSound}，算一致；少读、多读或读错任何一个音（包括${ai.strictSounds}），都算不一致。
+- problems：最多 3 条。part 写目标句里出问题的那几个字或词（照抄目标句里的写法）；issue_zh 说明听起来像读成了什么、最可能的原因（例如${ai.pronIssues}）；how_zh 给一个具体的练习方法。识别结果和目标句基本一致时返回空数组。
 - tip_zh：一句话，下一次跟读最该注意什么。
-不要评价音调（识别结果反映不出音调），不要编造识别结果里看不出来的问题。`;
+${ai.pitchNote}不要编造识别结果里看不出来的问题。`;
   return askJSON({ system, messages: [{ role: 'user', content: user }], schema: PRON_SCHEMA, effort: 'low' });
 }
 
@@ -192,18 +198,19 @@ const WORD_SCHEMA = obj({
 });
 
 export function lookupWord({ word, sentence }) {
-  const system = '你是给中国学生用的日语词典，解释简洁准确。';
-  const user = `学生在这句日语里点了一个词，请解释它在这句话里的意思。
+  const { name, ai } = L();
+  const system = `你是${name}词典，给${ai.learner}用，用中文解释，简洁准确。`;
+  const user = `学生在这句${name}里点了一个词，请解释它在这句话里的意思。
 句子：${sentence}
 点的词：${word}
 
 - word：学生点的这个词（照抄）。如果它只是一个词的一部分（如动词词尾、助动词被切开了），仍然只解释它，但在 usage_zh 里说明它和前后连起来的意思。
 - dictionary_form：词典形（原形），没有变化时和 word 相同。
-- reading：word 的平假名读音。
+- reading：${ai.lookupReading}。
 - meaning_zh：在这句话里的中文意思，简短。
-- pos_zh：词性（如 名词、动词（て形）、助词、い形容词）。
-- usage_zh：一两句话说明在这句里的用法或语法作用；中国学生容易误解的汉字词要特别提醒。
-- kanji_zh：如果含汉字，逐个汉字写“字（音读/训读）：意思”，用顿号分隔；不含汉字时为空字符串。`;
+- pos_zh：词性（如 名词、动词、助词、形容词，有变化时注明形式）。
+- usage_zh：一两句话说明在这句里的用法或语法作用；${ai.lookupConfusion}。
+- kanji_zh：${ai.lookupExtra}。`;
   return askJSON({ system, messages: [{ role: 'user', content: user }], schema: WORD_SCHEMA, effort: 'low' });
 }
 
@@ -211,9 +218,10 @@ export function lookupWord({ word, sentence }) {
 const SPEAKING_SCHEMA = obj({ speaking_level: { type: 'integer' }, comment_zh: str });
 
 export function evalSpeaking(qa) {
-  const levels = LEVELS.map((l) => `${l.id}=${l.name}（${l.desc}）`).join('；');
-  const system = '你是日语口语水平评估专家，学生母语为中文。回答可能来自语音识别，忽略同音字识别错误。';
-  const user = `学生回答了 5 个难度递增的日语问题（“（跳过）”表示没听懂或答不出）：
+  const { name, ai, levels: lvList } = L();
+  const levels = lvList.map((l) => `${l.id}=${l.name}（${l.desc}）`).join('；');
+  const system = `你是${name}口语水平评估专家，学生是${ai.learner}。回答可能来自语音识别，忽略同音字识别错误。`;
+  const user = `学生回答了 5 个难度递增的${name}问题（“（跳过）”表示没听懂或答不出）：
 ${qa.map((x, i) => `Q${i + 1}：${x.q}\nA${i + 1}：${x.a || '（跳过）'}`).join('\n')}
 
 请判断他的口语水平等级 speaking_level（整数 0–5）：${levels}。

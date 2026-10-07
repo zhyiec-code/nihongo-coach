@@ -1,7 +1,7 @@
 {
-  "name": "日语口语教练",
-  "short_name": "日语教练",
-  "description": "每天 1 小时，26 周练出日语口语",
+  "name": "口语教练",
+  "short_name": "口语教练",
+  "description": "每天 1 小时，26 周练出日语、意大利语、中文口语",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
