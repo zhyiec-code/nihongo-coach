@@ -1,6 +1,6 @@
 // Claude API：生成课程、情景对话陪练、纠错总结、口语评估
 import Anthropic from 'https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk/+esm';
-import { S, L } from './store.js';
+import { S, L, save } from './store.js';
 
 export const hasKey = () => !!S().settings.apiKey;
 
@@ -17,19 +17,71 @@ function getClient() {
   return client;
 }
 
-// 发送一次请求并按 JSON Schema 返回结构化结果
-async function askJSON({ system, messages, schema, effort = 'low' }) {
+// 每个功能用哪个模型、什么思考深度。"tiered"（默认）按任务难度分配模型来省钱：
+// 每天一次、决定教学质量的课程生成和水平评估用 Opus 5.5；对话和复盘用 Sonnet 5.5；
+// 次数多、任务简单的发音检查和查词用 Haiku 5.5。"opus" 全部用 Opus 5.5。
+const OPUS = 'claude-opus-5-5';
+const SONNET = 'claude-sonnet-5-5';
+const HAIKU = 'claude-haiku-5-5';
+const ROUTES = {
+  lesson: { name: '课程生成', model: OPUS, effort: 'medium' },
+  speaking: { name: '水平评估', model: OPUS, effort: 'medium' },
+  chat: { name: 'AI 对话', model: SONNET, effort: 'low' },
+  summary: { name: '对话复盘', model: SONNET, effort: 'medium' },
+  pron: { name: '发音检查', model: HAIKU, effort: 'low' },
+  lookup: { name: '点词查询', model: HAIKU, effort: 'low' },
+};
+export const ROUTE_NAMES = Object.fromEntries(Object.entries(ROUTES).map(([k, v]) => [k, v.name]));
+function routeModel(route) {
+  return S().settings.modelPlan === 'opus' ? OPUS : ROUTES[route].model;
+}
+
+// 每百万 token 的美元价格（2026-10-07 取自官方价格页 platform.claude.com/docs/en/about-claude/pricing）。
+// Haiku 5.5 为 10 万 token 以内的价格，本应用的请求都远小于这个长度
+const PRICES = {
+  [OPUS]: { input: 4, cacheWrite: 5, cacheRead: 0.2, output: 20 },
+  [SONNET]: { input: 2, cacheWrite: 2.5, cacheRead: 0.1, output: 10 },
+  [HAIKU]: { input: 0.1, cacheWrite: 0.125, cacheRead: 0.01, output: 0.5 },
+};
+// 记录每次调用的用量和估算费用（按天、按功能），在设置页显示
+function recordUsage(route, res) {
+  const u = res.usage || {};
+  // 被安全分类器转交给其他模型时 res.model 会不同；不在价格表里的模型按 Opus 5.5 估算（偏高）
+  const p = PRICES[res.model] || PRICES[OPUS];
+  const cost = ((u.input_tokens || 0) * p.input + (u.cache_creation_input_tokens || 0) * p.cacheWrite
+    + (u.cache_read_input_tokens || 0) * p.cacheRead + (u.output_tokens || 0) * p.output) / 1e6;
+  const st = S();
+  const day = new Date().toISOString().slice(0, 10);
+  const d = ((st.usage ||= {})[day] ||= {});
+  const r = (d[route] ||= { calls: 0, cost: 0, input: 0, cacheRead: 0, output: 0 });
+  r.calls++;
+  r.cost += cost;
+  r.input += (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0);
+  r.cacheRead += u.cache_read_input_tokens || 0;
+  r.output += u.output_tokens || 0;
+  save();
+}
+
+// 发送一次请求并按 JSON Schema 返回结构化结果。cache=true 时开启自动提示缓存（多轮对话用）
+async function askJSON({ route, system, messages, schema, cache = false }) {
+  const model = routeModel(route);
+  const params = {
+    model,
+    max_tokens: 16000,
+    output_config: { effort: ROUTES[route].effort, format: { type: 'json_schema', schema } },
+    system,
+    messages,
+  };
+  // 模型拒绝时由服务器自动换模型重试；Haiku 5.5 没有这个功能
+  if (model !== HAIKU) {
+    params.betas = ['server-side-fallback-2026-07-01'];
+    params.fallbacks = 'default';
+  }
+  // 自动缓存：每一轮都会重发整段对话，缓存后重复部分只按输入价格的 5% 计费
+  if (cache) params.cache_control = { type: 'ephemeral' };
   let res;
   try {
-    res = await getClient().beta.messages.create({
-      model: S().settings.model,
-      max_tokens: 16000,
-      betas: ['server-side-fallback-2026-07-01'],
-      fallbacks: 'default',
-      output_config: { effort, format: { type: 'json_schema', schema } },
-      system,
-      messages,
-    });
+    res = await getClient().beta.messages.create(params);
   } catch (e) {
     if (e instanceof Anthropic.AuthenticationError) throw new Error('API Key 无效，请在「设置」里检查');
     if (e instanceof Anthropic.RateLimitError) throw new Error('请求太频繁或额度不足，请稍后再试');
@@ -37,6 +89,7 @@ async function askJSON({ system, messages, schema, effort = 'low' }) {
     if (e instanceof Anthropic.APIError) throw new Error(`API 错误（${e.status}）：${e.message}`);
     throw e;
   }
+  recordUsage(route, res);
   if (res.stop_reason === 'refusal') throw new Error('模型拒绝了这次请求，请换个说法再试');
   if (res.stop_reason === 'max_tokens') throw new Error('回复过长被截断，请重试');
   const text = res.content.filter((b) => b.type === 'text').map((b) => b.text).join('');
@@ -90,7 +143,7 @@ ${previousTitles.length ? `本周前几天已经练过的子场景（请换一�
 - dialogue：一段 6–10 句的自然对话（speaker 用 A / B），用来做听力跟读，要用到今天的句子。
 - roleplay：给 AI 陪练的角色扮演设定。opening_ja 是 AI 的第一句话；tasks_zh 是学生在对话中要完成的 3 个任务（如“问价格”“表达偏好”）。
 - goal_zh：一句话说明今天学完能做到什么。`;
-  return askJSON({ system, messages: [{ role: 'user', content: user }], schema: LESSON_SCHEMA, effort: 'medium' });
+  return askJSON({ system, messages: [{ role: 'user', content: user }], schema: LESSON_SCHEMA, route: 'lesson' });
 }
 
 // ---------- 情景对话陪练 ----------
@@ -132,7 +185,7 @@ ${fieldNote()}
 
 // history: [{role:'user'|'assistant', content: string}]
 export function chatTurn(system, history) {
-  return askJSON({ system, messages: history, schema: TURN_SCHEMA, effort: 'low' });
+  return askJSON({ system, messages: history, schema: TURN_SCHEMA, route: 'chat', cache: true });
 }
 
 // ---------- 纠错总结 ----------
@@ -160,7 +213,7 @@ ${transcript}
 - mistakes：最值得改正的错误（最多 6 条），correct_ja 写正确的整句。
 - new_cards：从这次对话中挑 3–6 个学生应该记住、能直接用于对话的句子（包括改正后的句子和学生没能说出来的表达）。
 - next_focus_zh：下次练习最该注意的一点。`;
-  return askJSON({ system, messages: [{ role: 'user', content: user }], schema: SUMMARY_SCHEMA, effort: 'medium' });
+  return askJSON({ system, messages: [{ role: 'user', content: user }], schema: SUMMARY_SCHEMA, route: 'summary' });
 }
 
 // ---------- 跟读发音分析 ----------
@@ -169,6 +222,20 @@ const PRON_SCHEMA = obj({
   problems: arr(obj({ part: str, issue_zh: str, how_zh: str })),
   tip_zh: str,
 });
+
+// 同一句、同样的识别结果，不重复请求 AI。结果存在手机上，关掉 App 也有效；最多保留最近 1000 条
+const PRON_CACHE_MAX = 1000;
+const pending = new Map(); // 正在请求中的，避免同时重复发送
+function cachedPron(key) {
+  return (S().pronCache || {})[key];
+}
+function storePron(key, value) {
+  const cache = (S().pronCache ||= {});
+  cache[key] = value;
+  const keys = Object.keys(cache);
+  for (let i = 0; i < keys.length - PRON_CACHE_MAX; i++) delete cache[keys[i]];
+  save();
+}
 
 export function pronunciationFeedback({ ja, reading, heard }) {
   const { name, ai } = L();
@@ -183,7 +250,15 @@ ${heard.map((h, i) => `${i + 1}. ${h}`).join('\n')}
 - problems：最多 3 条。part 写目标句里出问题的那几个字或词（照抄目标句里的写法）；issue_zh 说明听起来像读成了什么、最可能的原因（例如${ai.pronIssues}）；how_zh 给一个具体的练习方法。识别结果和目标句基本一致时返回空数组。
 - tip_zh：一句话，下一次跟读最该注意什么。
 ${ai.pitchNote}不要编造识别结果里看不出来的问题。`;
-  return askJSON({ system, messages: [{ role: 'user', content: user }], schema: PRON_SCHEMA, effort: 'low' });
+  const key = `${L().id}|${ja}|${heard.join('|')}`;
+  const hit = cachedPron(key);
+  if (hit) return Promise.resolve(hit);
+  if (pending.has(key)) return pending.get(key);
+  const p = askJSON({ system, messages: [{ role: 'user', content: user }], schema: PRON_SCHEMA, route: 'pron' })
+    .then((r) => { storePron(key, r); return r; })
+    .finally(() => pending.delete(key));
+  pending.set(key, p);
+  return p;
 }
 
 // ---------- 点词查询 ----------
@@ -211,7 +286,7 @@ export function lookupWord({ word, sentence }) {
 - pos_zh：词性（如 名词、动词、助词、形容词，有变化时注明形式）。
 - usage_zh：一两句话说明在这句里的用法或语法作用；${ai.lookupConfusion}。
 - kanji_zh：${ai.lookupExtra}。`;
-  return askJSON({ system, messages: [{ role: 'user', content: user }], schema: WORD_SCHEMA, effort: 'low' });
+  return askJSON({ system, messages: [{ role: 'user', content: user }], schema: WORD_SCHEMA, route: 'lookup' });
 }
 
 // ---------- 分级测试中的口语评估 ----------
@@ -226,5 +301,5 @@ ${qa.map((x, i) => `Q${i + 1}：${x.q}\nA${i + 1}：${x.a || '（跳过）'}`).j
 
 请判断他的口语水平等级 speaking_level（整数 0–5）：${levels}。
 comment_zh：用两三句中文说明判断依据和最大的口语短板。`;
-  return askJSON({ system, messages: [{ role: 'user', content: user }], schema: SPEAKING_SCHEMA, effort: 'medium' });
+  return askJSON({ system, messages: [{ role: 'user', content: user }], schema: SPEAKING_SCHEMA, route: 'speaking' });
 }

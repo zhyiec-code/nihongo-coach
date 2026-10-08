@@ -10,7 +10,7 @@ import {
   recordModeInfo, resetRecordMode, canSelfRecord, recordSelf, stopSelfRecording, isSelfRecording,
 } from './speech.js';
 import {
-  hasKey, generateLesson, chatSystem, chatTurn, summarize, evalSpeaking, pronunciationFeedback, lookupWord,
+  hasKey, generateLesson, chatSystem, chatTurn, summarize, evalSpeaking, pronunciationFeedback, lookupWord, ROUTE_NAMES,
 } from './ai.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -1044,19 +1044,54 @@ function viewChat() {
 }
 
 // ---------- 设置 ----------
+// 今天和本月的 API 费用，按功能分开
+function usageReport() {
+  const usage = S().usage || {};
+  const today = new Date().toISOString().slice(0, 10);
+  const month = today.slice(0, 7);
+  const sum = (days) => {
+    const out = {};
+    for (const [d, routes] of Object.entries(usage)) {
+      if (!days(d)) continue;
+      for (const [r, v] of Object.entries(routes)) {
+        const o = (out[r] ||= { calls: 0, cost: 0 });
+        o.calls += v.calls;
+        o.cost += v.cost;
+      }
+    }
+    return out;
+  };
+  const todayU = sum((d) => d === today);
+  const monthU = sum((d) => d.startsWith(month));
+  const total = (u) => Object.values(u).reduce((a, v) => a + v.cost, 0);
+  const usd = (n) => `$${n < 0.01 && n > 0 ? n.toFixed(4) : n.toFixed(2)}`;
+  const routes = Object.keys(ROUTE_NAMES).filter((r) => monthU[r]);
+  if (!routes.length) return '<p class="hint">还没有记录。用量从这个版本开始统计。</p>';
+  return `<div class="stats two"><div><b>${usd(total(todayU))}</b><span>今天</span></div><div><b>${usd(total(monthU))}</b><span>本月</span></div></div>
+    <table class="usage"><tr><th>功能</th><th>今天</th><th>本月</th></tr>
+    ${routes.map((r) => `<tr><td>${esc(ROUTE_NAMES[r])}</td><td>${usd(todayU[r]?.cost || 0)}<small>${todayU[r]?.calls || 0} 次</small></td><td>${usd(monthU[r].cost)}<small>${monthU[r].calls} 次</small></td></tr>`).join('')}
+    </table>`;
+}
+
 function viewSettings() {
   const st = S().settings;
   main().innerHTML = `
     <section class="card">
       <h2>Claude API</h2>
       <label>API Key<input type="password" id="key" value="${esc(st.apiKey)}" placeholder="sk-ant-..." autocomplete="off"></label>
-      <label>模型
-        <select id="model">
-          <option value="claude-opus-5-5" ${st.model === 'claude-opus-5-5' ? 'selected' : ''}>Claude Opus 5.5（效果最好）</option>
-          <option value="claude-sonnet-5-5" ${st.model === 'claude-sonnet-5-5' ? 'selected' : ''}>Claude Sonnet 5.5（更快、更便宜）</option>
+      <label>模型方案
+        <select id="plan">
+          <option value="tiered" ${st.modelPlan !== 'opus' ? 'selected' : ''}>分级使用（推荐，省钱）</option>
+          <option value="opus" ${st.modelPlan === 'opus' ? 'selected' : ''}>全部用 Opus 5.5（效果最好，最贵）</option>
         </select>
       </label>
-      <p class="hint">Key 只保存在本设备浏览器中，由浏览器直接请求 Anthropic API。</p>
+      <p class="hint">分级使用：课程生成和水平评估用 Opus 5.5，AI 对话和复盘用 Sonnet 5.5，发音检查和查词用 Haiku 5.5。<br>
+      Key 只保存在本设备浏览器中，由浏览器直接请求 Anthropic API。</p>
+    </section>
+    <section class="card">
+      <h2>API 用量（估算）</h2>
+      ${usageReport()}
+      <p class="hint">按官方价格估算，所有语言合计，只统计这台设备。实际费用以 platform.claude.com 的账单为准。</p>
     </section>
     <section class="card">
       <h2>语音</h2>
@@ -1092,7 +1127,7 @@ function viewSettings() {
   };
   $('#save').onclick = () => {
     st.apiKey = $('#key').value.trim();
-    st.model = $('#model').value;
+    st.modelPlan = $('#plan').value;
     st.ttsRate = +$('#rate').value;
     st.showReading = $('#reading').checked;
     save();

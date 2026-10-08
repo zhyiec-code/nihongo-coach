@@ -267,3 +267,9 @@ body.no-tabs .chat-input { bottom: 64px; }
 .lang-switch button { font: inherit; font-size: .85rem; border: 1px solid var(--line); background: var(--card); color: var(--text); border-radius: 99px; padding: 6px 12px; cursor: pointer; }
 .lang-switch button.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
 .logo { font-size: 2.2rem; }
+
+/* API 用量 */
+table.usage { width: 100%; border-collapse: collapse; font-size: .88rem; margin-top: 8px; }
+table.usage th, table.usage td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line); }
+table.usage th { color: var(--muted); font-weight: 600; }
+table.usage small { color: var(--muted); margin-left: 6px; }

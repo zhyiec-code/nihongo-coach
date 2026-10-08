@@ -15,10 +15,12 @@ const freshCourse = () => ({
   dict: {}, // 点词查询缓存：'词|句子' -> 解释
 });
 const defaults = () => ({
-  settings: { apiKey: '', model: 'claude-opus-5-5', ttsRate: 0.9, showReading: true, lang: 'ja' },
+  settings: { apiKey: '', modelPlan: 'tiered', ttsRate: 0.9, showReading: true, lang: 'ja' },
   ...freshCourse(),
   courses: {},
   log: {}, // 'YYYY-MM-DD' -> 分钟数（所有语言合计）
+  pronCache: {}, // 发音检查结果缓存：'语言|目标句|识别结果' -> AI 分析
+  usage: {}, // 'YYYY-MM-DD' -> { 功能: { calls, cost, input, cacheRead, output } }（API 用量估算，所有语言合计）
 });
 
 let state;
