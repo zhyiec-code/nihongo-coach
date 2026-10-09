@@ -279,6 +279,7 @@ function router() {
   document.title = L().appTitle;
   $$('.tabbar a').forEach((a) => a.classList.toggle('active', a.dataset.tab === (name || 'home')));
   document.body.classList.toggle('no-tabs', ['welcome', 'test', 'session'].includes(name));
+  document.body.classList.toggle('in-session', name === 'session');
   window.scrollTo(0, 0);
   (routes[name] || viewHome)(arg);
 }

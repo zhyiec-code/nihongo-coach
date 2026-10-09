@@ -172,7 +172,14 @@ label.check input { width: auto; margin: 0; }
 .stepper { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; }
 .stepper button { flex: none; font: inherit; font-size: .8rem; border: 1px solid var(--line); background: var(--card); color: var(--muted); border-radius: 99px; padding: 6px 12px; cursor: pointer; }
 .stepper button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
-.session-foot { position: sticky; bottom: 0; padding: 8px 0 calc(8px + env(safe-area-inset-bottom)); background: linear-gradient(transparent, var(--bg) 30%); }
+/* “下一步”按钮固定在屏幕底部。不用 position: sticky：iPhone 主屏幕 App 里 sticky 的位置会算错，按钮停在半屏处挡住内容 */
+.session-foot {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; max-width: 640px; margin: 0 auto;
+  padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); background: linear-gradient(transparent, var(--bg) 30%);
+}
+.session-foot .btn.block { margin-top: 0; }
+/* 给固定按钮留出空间，最后一句也能滚到按钮上方 */
+body.in-session { padding-bottom: calc(96px + env(safe-area-inset-bottom)); }
 .loading { text-align: center; padding: 48px 0; color: var(--muted); }
 .spin { width: 32px; height: 32px; margin: 0 auto 12px; border: 3px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -208,7 +215,8 @@ label.check input { width: auto; margin: 0; }
 .fix .why { color: #6b655f; font-size: .82rem; margin: 2px 0 4px; }
 .done-note { text-align: center; color: var(--ok); font-weight: 600; font-size: .9rem; }
 .chat-input { display: flex; gap: 8px; align-items: flex-end; position: sticky; bottom: 70px; background: var(--bg); padding: 8px 0; }
-body.no-tabs .chat-input { bottom: 64px; }
+body.no-tabs .chat-input { bottom: 0; }
+body.in-session .chat-input { bottom: calc(64px + env(safe-area-inset-bottom)); }
 .chat-input textarea { margin: 0; resize: none; min-height: 52px; }
 .chat-input .btn { min-height: 52px; }
 .mistake { border-bottom: 1px solid var(--line); padding: 8px 0; }
