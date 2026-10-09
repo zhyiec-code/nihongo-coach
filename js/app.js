@@ -1082,11 +1082,11 @@ function viewSettings() {
       <label>API Key<input type="password" id="key" value="${esc(st.apiKey)}" placeholder="sk-ant-..." autocomplete="off"></label>
       <label>模型方案
         <select id="plan">
-          <option value="tiered" ${st.modelPlan !== 'opus' ? 'selected' : ''}>分级使用（推荐，省钱）</option>
-          <option value="opus" ${st.modelPlan === 'opus' ? 'selected' : ''}>全部用 Opus 5.5（效果最好，最贵）</option>
+          ${[['haiku', '全部用 Haiku 5.5（最省钱）'], ['tiered', '分级使用（费用中等）'], ['opus', '全部用 Opus 5.5（效果最好，最贵）']]
+            .map(([v, label]) => `<option value="${v}" ${st.modelPlan === v ? 'selected' : ''}>${label}</option>`).join('')}
         </select>
       </label>
-      <p class="hint">分级使用：课程生成和水平评估用 Opus 5.5，AI 对话和复盘用 Sonnet 5.5，发音检查和查词用 Haiku 5.5。<br>
+      <p class="hint">分级使用：课程生成和水平评估用 Opus 5.5，AI 对话和复盘用 Sonnet 5.5，发音检查和查词用 Haiku 5.5。如果觉得 Haiku 生成的课程或纠错质量不够好，可以换成分级使用。<br>
       Key 只保存在本设备浏览器中，由浏览器直接请求 Anthropic API。</p>
     </section>
     <section class="card">

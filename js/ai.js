@@ -17,9 +17,11 @@ function getClient() {
   return client;
 }
 
-// 每个功能用哪个模型、什么思考深度。"tiered"（默认）按任务难度分配模型来省钱：
-// 每天一次、决定教学质量的课程生成和水平评估用 Opus 5.5；对话和复盘用 Sonnet 5.5；
-// 次数多、任务简单的发音检查和查词用 Haiku 5.5。"opus" 全部用 Opus 5.5。
+// 每个功能用哪个模型、什么思考深度。模型方案（设置页可改）：
+//   "haiku"（默认）全部用 Haiku 5.5，最省钱；
+//   "tiered" 按任务难度分配：课程生成和水平评估用 Opus 5.5，对话和复盘用 Sonnet 5.5，发音检查和查词用 Haiku 5.5；
+//   "opus" 全部用 Opus 5.5。
+// 思考深度（effort）对所有模型都一样按功能设置
 const OPUS = 'claude-opus-5-5';
 const SONNET = 'claude-sonnet-5-5';
 const HAIKU = 'claude-haiku-5-5';
@@ -33,7 +35,10 @@ const ROUTES = {
 };
 export const ROUTE_NAMES = Object.fromEntries(Object.entries(ROUTES).map(([k, v]) => [k, v.name]));
 function routeModel(route) {
-  return S().settings.modelPlan === 'opus' ? OPUS : ROUTES[route].model;
+  const plan = S().settings.modelPlan;
+  if (plan === 'opus') return OPUS;
+  if (plan === 'tiered') return ROUTES[route].model;
+  return HAIKU;
 }
 
 // 每百万 token 的美元价格（2026-10-07 取自官方价格页 platform.claude.com/docs/en/about-claude/pricing）。

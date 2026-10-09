@@ -15,7 +15,7 @@ const freshCourse = () => ({
   dict: {}, // 点词查询缓存：'词|句子' -> 解释
 });
 const defaults = () => ({
-  settings: { apiKey: '', modelPlan: 'tiered', ttsRate: 0.9, showReading: true, lang: 'ja' },
+  settings: { apiKey: '', modelPlan: 'haiku', ttsRate: 0.9, showReading: true, lang: 'ja' },
   ...freshCourse(),
   courses: {},
   log: {}, // 'YYYY-MM-DD' -> 分钟数（所有语言合计）
@@ -31,6 +31,11 @@ try {
 }
 // 旧版本没有 lang 设置，那时只有日语
 state.settings = { ...defaults().settings, ...state.settings };
+// 2026-10-09 起默认全部用 Haiku 5.5 以降低费用：旧版本保存的方案统一切换一次，之后尊重用户在设置里的选择
+if (state.settings.planVersion !== 2) {
+  state.settings.modelPlan = 'haiku';
+  state.settings.planVersion = 2;
+}
 if (!LANGS[state.settings.lang]) state.settings.lang = 'ja';
 
 // 当前学习的语言配置
