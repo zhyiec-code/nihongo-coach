@@ -118,7 +118,8 @@ function bindSelfRecord(box, getJa) {
     speechSynthesis.cancel();
     const a = new Audio(url);
     a.onended = () => setTimeout(() => speak(getJa()), 400);
-    a.play();
+    // iPhone 只允许在点击时播放声音：录音自动停止后的自动播放可能被拦截，这时让用户点按钮播放
+    return a.play().then(() => true, () => false);
   };
   btn.onclick = async () => {
     if (isSelfRecording()) return stopSelfRecording();
@@ -138,9 +139,11 @@ function bindSelfRecord(box, getJa) {
         <span>🎙 你的录音：</span>
         <button class="btn sm" data-playself>▶ 我的录音</button>
         <button class="btn sm" data-compare>🔁 我的 + 标准对比</button></div>`;
-      $('[data-playself]', out).onclick = () => { speechSynthesis.cancel(); new Audio(url).play(); };
+      $('[data-playself]', out).onclick = () => { speechSynthesis.cancel(); new Audio(url).play().catch(() => {}); };
       $('[data-compare]', out).onclick = playCompare;
-      playCompare();
+      if (!(await playCompare())) {
+        out.insertAdjacentHTML('beforeend', '<div class="pr-legend">录好了，点「🔁 我的 + 标准对比」播放</div>');
+      }
     } catch (e) {
       out.innerHTML = `<div class="pr-result fail">${esc(e.message)}</div>`;
     } finally {

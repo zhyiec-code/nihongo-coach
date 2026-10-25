@@ -91,12 +91,24 @@ export function ttsDiagnosis() {
 const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
 export const sttSupported = !!Rec;
 
+const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const ERRORS = {
   'not-allowed': '没有麦克风权限，请在浏览器设置里允许本网站使用麦克风',
   'no-speech': '没听到声音，再试一次',
   'audio-capture': '麦克风被占用或无法使用',
   network: '语音识别需要联网',
+  // iPhone 的语音识别借用系统的“听写”功能，没开听写或麦克风正被占用时会被中断
+  aborted: IOS ? '语音识别被系统中断了，再试一次。如果一直这样，请到 iPhone「设置 → 通用 → 键盘」打开「启用听写」' : '语音识别被中断了，再试一次',
+  'service-not-allowed': IOS ? 'iPhone 的语音识别没有打开：请到「设置 → 通用 → 键盘」打开「启用听写」，再完全关闭并重新打开 App' : '语音识别服务不可用',
 };
+
+// 录音格式：iPhone Safari 只支持 audio/mp4，用默认格式时可能录不到声音
+function newRecorder(stream) {
+  const type = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'].find((t) => MediaRecorder.isTypeSupported?.(t));
+  return type ? new MediaRecorder(stream, { mimeType: type }) : new MediaRecorder(stream);
+}
+// 每 250ms 取一次数据：iPhone 上只在 stop 时取数据有时会拿到空录音
+const REC_SLICE_MS = 250;
 
 // 识别一句话，返回候选文本（按可信度排序）。传入 track 时让识别直接使用这条录音轨道
 function recognizeOnce(track) {
@@ -143,10 +155,12 @@ export function listen() {
 const MODE_KEY = 'nihongo-coach-rec-mode';
 const MODES = ['track', 'parallel', 'off'];
 const MODE_NAMES = { track: '录音并识别（方式 1）', parallel: '录音并识别（方式 2）', off: '只识别，不录音' };
-let recMode = { mode: 'track', confirmed: false };
+// iPhone 上语音识别和录音不能同时用麦克风，直接从“只识别”开始；回放用“录一遍听听”
+let recMode = IOS ? { mode: 'off', confirmed: true } : { mode: 'track', confirmed: false };
 try {
   const saved = JSON.parse(localStorage.getItem(MODE_KEY));
-  if (MODES.includes(saved?.mode)) recMode = saved;
+  // iPhone 不管以前保存的是哪种，都用“只识别”
+  if (MODES.includes(saved?.mode) && !IOS) recMode = saved;
 } catch {}
 function setMode(mode, confirmed) {
   recMode = { mode, confirmed };
@@ -154,7 +168,7 @@ function setMode(mode, confirmed) {
 }
 export const canRecord = () => recMode.mode !== 'off' && !!window.MediaRecorder && !!navigator.mediaDevices?.getUserMedia;
 export const recordModeInfo = () => `${MODE_NAMES[recMode.mode]}${recMode.confirmed ? '' : '（检测中）'}`;
-export const resetRecordMode = () => setMode('track', false);
+export const resetRecordMode = () => (IOS ? setMode('off', true) : setMode('track', false));
 
 // 跟读一次：同时录音（用于回放）和识别（用于打分）
 export async function recordAttempt() {
@@ -167,9 +181,9 @@ export async function recordAttempt() {
   if (mode !== 'off') {
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
-      rec = new MediaRecorder(stream);
+      rec = newRecorder(stream);
       rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
-      rec.start();
+      rec.start(REC_SLICE_MS);
     } catch (e) {
       if (e.name === 'NotAllowedError') throw new Error(ERRORS['not-allowed']);
       stream = null;
@@ -283,11 +297,13 @@ export async function recordSelf() {
   } catch (e) {
     throw new Error(e.name === 'NotAllowedError' ? ERRORS['not-allowed'] : '无法打开麦克风');
   }
-  const rec = new MediaRecorder(stream);
+  const rec = newRecorder(stream);
   const chunks = [];
   rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
-  // 用音量判断什么时候说完了
+  // 用音量判断什么时候说完了。iPhone 上 AudioContext 可能处于暂停状态，读到的音量一直是 0：
+  // 这时不能按“一直没声音”自动停止，只能等用户点停止或到 20 秒上限
   const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  ctx.resume?.().catch(() => {});
   const analyser = ctx.createAnalyser();
   analyser.fftSize = 1024;
   ctx.createMediaStreamSource(stream).connect(analyser);
@@ -305,7 +321,7 @@ export async function recordSelf() {
         lastLoud = now;
       }
       const silentAfterSpeech = spoke && now - lastLoud > 1200;
-      const nothingSaid = !spoke && now - started > 7000;
+      const nothingSaid = !spoke && ctx.state === 'running' && now - started > 7000;
       if (silentAfterSpeech || nothingSaid || now - started > 20000) stopSelfRecording();
     }, 100);
     rec.onstop = () => {
@@ -315,7 +331,7 @@ export async function recordSelf() {
       selfRec = null;
       resolve(chunks.length ? URL.createObjectURL(new Blob(chunks, { type: rec.mimeType || 'audio/webm' })) : null);
     };
-    rec.start();
+    rec.start(REC_SLICE_MS);
     selfRec = rec;
   });
 }
