@@ -41,6 +41,19 @@ if (!LANGS[state.settings.lang]) state.settings.lang = 'ja';
 // 当前学习的语言配置
 export const L = () => LANGS[state.settings.lang];
 
+// 界面语言（'zh' 或 'en'），按学习语言分别设置。中文课是给海外长大的孩子用的，默认英文界面
+export function uiLang() {
+  return state.settings.uiLangs?.[state.settings.lang] || L().defaultUi || 'zh';
+}
+export function setUiLang(v) {
+  (state.settings.uiLangs ||= {})[state.settings.lang] = v;
+  save();
+}
+// 界面文字：T('中文', 'English') 按当前界面语言返回其中一个
+export const T = (zh, en) => (uiLang() === 'en' ? en : zh);
+// 课程配置里的字段：英文界面时优先用 xxx_en，没有就用中文
+export const LX = (obj, key) => (uiLang() === 'en' && obj?.[`${key}_en`]) || obj?.[key];
+
 // 切换学习语言：保存当前语言的进度，换上另一种语言的进度（没有就从头开始）
 export function switchLang(id) {
   if (!LANGS[id] || id === state.settings.lang) return;

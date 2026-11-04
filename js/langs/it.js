@@ -108,12 +108,15 @@ const PRACTICE_UNITS = [
 export default {
   id: 'it',
   name: '意大利语',
+  name_en: 'Italian',
   flag: '🇮🇹',
   bcp47: 'it-IT',
   htmlLang: 'it',
   appTitle: '意大利语口语教练',
   readingLabel: '音节与重音',
   sample: 'Ciao! Facciamo pratica di italiano insieme.',
+  // 周测评和自由对话里学生说的第一句（API 要求对话由学生先开口）
+  greeting: 'Buongiorno! Piacere.',
   voiceRe: /natural|google|alice|federica|elsa|isabella|luca/i,
   voiceInstall: { android: 'Italiano', ios: '意大利语' },
   levels: LEVELS,

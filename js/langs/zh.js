@@ -10,6 +10,41 @@ const LEVELS = [
   { id: 5, name: 'HSK5+', desc: '能流利表达', target: '说话自然地道，和国内同龄人交流没有障碍（HSK5–6 口语）' },
 ];
 
+// 英文界面用的等级名称、说明和目标（与 LEVELS 一一对应）
+const LEVELS_EN = [
+  [
+    "Listening only",
+    "Understands a few words, can hardly speak",
+    "Talk with family in simple, complete sentences (about HSK 2 speaking)"
+  ],
+  [
+    "Starter",
+    "Can say simple words and short phrases",
+    "Talk about school, hobbies and home in full sentences (about HSK 3 speaking)"
+  ],
+  [
+    "HSK 2",
+    "Can describe everyday things in simple sentences",
+    "Chat fairly fluently about daily topics and tell your own stories (HSK 3–4 speaking)"
+  ],
+  [
+    "HSK 3",
+    "Can hold everyday conversations",
+    "Talk fluently about most daily topics with mostly correct tones (about HSK 4 speaking)"
+  ],
+  [
+    "HSK 4",
+    "Talks fairly fluently about familiar topics",
+    "Tell stories and give opinions using idioms and natural expressions (about HSK 5 speaking)"
+  ],
+  [
+    "HSK 5+",
+    "Speaks fluently",
+    "Speak naturally, just like kids of the same age in China (HSK 5–6 speaking)"
+  ]
+];
+LEVELS.forEach((l, i) => Object.assign(l, { name_en: LEVELS_EN[i][0], desc_en: LEVELS_EN[i][1], target_en: LEVELS_EN[i][2] }));
+
 // 分级测试题库：lv 1–5，每级随机抽 4 题，答对 3 题以上进入下一级
 const PLACEMENT_ITEMS = [
   // lv1 只能听懂一点：全部是听力 + emoji 选项
@@ -52,6 +87,215 @@ const PLACEMENT_ITEMS = [
   { lv: 5, type: 'listen', audio: '这次比赛虽然输了，但我们从中学到了很多宝贵的经验。', q: '听到的是什么意思？', options: ['比赛赢了，很开心', '输了，什么也没学到', '虽然输了，但学到了很多', '比赛取消了'], answer: 2 },
   { lv: 5, type: 'listen', audio: '既然你已经决定了，那就坚持下去吧。', q: '听到的是什么意思？', options: ['你再考虑一下吧', '已经决定了就坚持下去', '你决定得太快了', '我不同意你的决定'], answer: 1 },
 ];
+
+// 英文界面用的题目和选项（与 PLACEMENT_ITEMS 一一对应）。听力题给出英文选项（测的是听懂没有）；
+// 填空题的选项本身就是要考的中文，不翻译
+const ITEMS_EN = [
+  [
+    "Which one did you hear?",
+    null
+  ],
+  [
+    "What does it mean?",
+    [
+      "😴 Sleepy",
+      "😋 Hungry",
+      "😢 Sad",
+      "🥶 Cold"
+    ]
+  ],
+  [
+    "Who is it?",
+    [
+      "👩 Mom",
+      "👨 Dad",
+      "👵 Grandma",
+      "👦 Big brother"
+    ]
+  ],
+  [
+    "Which number did you hear?",
+    null
+  ],
+  [
+    "What does it mean?",
+    [
+      "👋 Hello",
+      "🙏 Thank you",
+      "😔 Sorry",
+      "🚪 Goodbye"
+    ]
+  ],
+  [
+    "What are they going to do?",
+    [
+      "⚽ Play soccer",
+      "🏊 Go swimming",
+      "🚲 Ride a bike",
+      "📚 Read a book"
+    ]
+  ],
+  [
+    "What is being asked?",
+    [
+      "Your name",
+      "Your age",
+      "The time",
+      "The weather"
+    ]
+  ],
+  [
+    "What does it mean?",
+    [
+      "We went to the park yesterday",
+      "Going to school today",
+      "Let's go play in the park tomorrow",
+      "Going to grandma's tomorrow"
+    ]
+  ],
+  [
+    "Fill in the blank: 我（　）学生。 (I am a student.)",
+    null
+  ],
+  [
+    "Fill in the blank: 我家有两（　）狗。 (We have two dogs.)",
+    null
+  ],
+  [
+    "Which character is pinyin “mǎ” (horse)?",
+    null
+  ],
+  [
+    "What is being asked?",
+    [
+      "Which one you like more",
+      "Whether the food is ready",
+      "How much you ate",
+      "Where to eat"
+    ]
+  ],
+  [
+    "Fill in the blank: 我把作业写（　）了。 (I finished my homework.)",
+    null
+  ],
+  [
+    "Fill in the blank: 哥哥比我（　）。 (My big brother is taller than me.)",
+    null
+  ],
+  [
+    "Fill in the blank: 你去（　）北京吗？ (Have you ever been to Beijing?)",
+    null
+  ],
+  [
+    "Fill in the blank: 门开（　）呢，快进来吧。 (The door is open, come in.)",
+    null
+  ],
+  [
+    "What does it mean?",
+    [
+      "It rained, but we still played soccer",
+      "Because it rained, we didn't play soccer",
+      "It rained after we played soccer",
+      "It will rain tomorrow"
+    ]
+  ],
+  [
+    "What do they want you to do?",
+    [
+      "Open the door",
+      "Close the door",
+      "Knock on the door",
+      "Lock the window"
+    ]
+  ],
+  [
+    "Fill in the blanks: （　）他很忙，（　）每天都给妈妈打电话。 (Although he is busy, he still calls mom every day.)",
+    null
+  ],
+  [
+    "Fill in the blank: 这个问题连老师（　）不知道。 (Even the teacher doesn't know this.)",
+    null
+  ],
+  [
+    "Fill in the blank: 我（　）吃了一个包子，现在还饿。 (I only ate one bun, I'm still hungry.)",
+    null
+  ],
+  [
+    "What does 「马马虎虎」 mean?",
+    [
+      "Running fast",
+      "Very careful",
+      "Careless / so-so",
+      "Very angry"
+    ]
+  ],
+  [
+    "What does it mean?",
+    [
+      "Hurry up and talk",
+      "Don't worry, tell me slowly what happened",
+      "Nothing happened",
+      "I'm very worried"
+    ]
+  ],
+  [
+    "What happened in the end?",
+    [
+      "They were late",
+      "They missed the bus",
+      "Almost late, but caught the last bus",
+      "The bus was late"
+    ]
+  ],
+  [
+    "What does 「画蛇添足」 mean?",
+    [
+      "Being good at drawing",
+      "Doing something unnecessary that spoils it",
+      "Moving very fast",
+      "Thinking very carefully"
+    ]
+  ],
+  [
+    "Fill in the blank: 与其在家玩手机，（　）出去走走。 (Rather than playing on your phone, you'd better go out.)",
+    null
+  ],
+  [
+    "Fill in the blank: （　）你同意不同意，我都要去。 (Whether you agree or not, I'm going.)",
+    null
+  ],
+  [
+    "What does 「他说话总是拐弯抹角的」 mean?",
+    [
+      "He talks fast",
+      "He never says things directly",
+      "He talks loudly",
+      "He is funny"
+    ]
+  ],
+  [
+    "What does it mean?",
+    [
+      "They won and are happy",
+      "They lost and learned nothing",
+      "They lost, but learned a lot",
+      "The game was cancelled"
+    ]
+  ],
+  [
+    "What does it mean?",
+    [
+      "Think about it again",
+      "You've decided, so stick with it",
+      "You decided too quickly",
+      "I don't agree with your decision"
+    ]
+  ]
+];
+PLACEMENT_ITEMS.forEach((it, i) => {
+  it.q_en = ITEMS_EN[i][0];
+  if (ITEMS_EN[i][1]) it.options_en = ITEMS_EN[i][1];
+});
 
 // 口语测试：难度递增的 5 个问题
 const SPEAKING_QUESTIONS = [
@@ -98,33 +342,199 @@ const UNITS = [
   { title: '自然流利：口语与语气', grammar: ['嗯／那个／就是', '语气词 啊／呀／嘛／呗', '儿化'], scene: '像在国内一样自然地聊天' },
 ];
 
+// 英文界面用的单元标题和场景（与 UNITS 一一对应）
+const UNITS_EN = [
+  [
+    "Pinyin and tones",
+    "Say hi to grandma and grandpa on a video call"
+  ],
+  [
+    "Introducing yourself",
+    "Meeting relatives from China for the first time"
+  ],
+  [
+    "My family",
+    "Introducing your family and pets"
+  ],
+  [
+    "Numbers, time and dates",
+    "Setting a time for a video call with grandma"
+  ],
+  [
+    "My day",
+    "Telling mom what you did at school today"
+  ],
+  [
+    "Food",
+    "Ordering at a Chinese restaurant"
+  ],
+  [
+    "Shopping",
+    "Buying snacks and stationery at the supermarket"
+  ],
+  [
+    "School life",
+    "Chatting about school with kids in China"
+  ],
+  [
+    "Hobbies and sports",
+    "Talking about your favorite sports and games"
+  ],
+  [
+    "My weekend",
+    "What you did at the park last weekend"
+  ],
+  [
+    "Invitations and plans",
+    "Inviting friends to play"
+  ],
+  [
+    "Describing people and things",
+    "Describing what your best friend looks like"
+  ],
+  [
+    "Being polite",
+    "Visiting someone's home"
+  ],
+  [
+    "Comparing things",
+    "Comparing things in China and Italy"
+  ],
+  [
+    "Feeling sick",
+    "Telling your parents you don't feel well"
+  ],
+  [
+    "Weather and seasons",
+    "Chatting with grandma about the weather"
+  ],
+  [
+    "Giving reasons",
+    "Explaining to the teacher why you were late"
+  ],
+  [
+    "Directions",
+    "Asking for directions in China"
+  ],
+  [
+    "The 把 sentence",
+    "Helping mom tidy your room"
+  ],
+  [
+    "Result complements",
+    "Doing a craft with friends"
+  ],
+  [
+    "What are you doing now?",
+    "Telling family on the phone what you're doing"
+  ],
+  [
+    "Festivals and traditions",
+    "Celebrating Chinese New Year with family"
+  ],
+  [
+    "Telling stories",
+    "Telling a fun little story"
+  ],
+  [
+    "Feelings",
+    "Talking about happy and sad things"
+  ],
+  [
+    "If…",
+    "Planning a summer trip to China"
+  ],
+  [
+    "The 被 sentence",
+    "Telling about an unlucky day"
+  ],
+  [
+    "Idioms and sayings",
+    "Telling a story with idioms"
+  ],
+  [
+    "News and society",
+    "Talking about recent news"
+  ],
+  [
+    "Giving opinions",
+    "Should kids have phones?"
+  ],
+  [
+    "Debating and persuading",
+    "Persuading your family to get a pet"
+  ],
+  [
+    "Culture and identity",
+    "Growing up between two cultures"
+  ],
+  [
+    "Sounding natural",
+    "Chatting naturally like kids in China"
+  ]
+];
+UNITS.forEach((u, i) => Object.assign(u, { title_en: UNITS_EN[i][0], scene_en: UNITS_EN[i][1] }));
+
 const START_UNIT = [0, 2, 6, 12, 18, 24];
 
+// 英文界面用的实战主题（与下面的列表一一对应）
+const PRACTICE_EN = [
+  "Visiting family in China",
+  "New Year's Eve dinner with relatives",
+  "A day at a school in China",
+  "Watching Chinese cartoons",
+  "Idiom story time",
+  "Making mooncakes for Mid-Autumn",
+  "Playing games with kids in China",
+  "A trip to the zoo",
+  "Traveling by high-speed train",
+  "Night market",
+  "Chinese calligraphy",
+  "My city",
+  "Birthday party",
+  "Being a little tour guide",
+  "My dream",
+  "Talking about favorite books",
+  "Protecting the environment",
+  "Looking back and ahead"
+];
 const PRACTICE_UNITS = [
   '回国探亲', '和亲戚吃年夜饭', '在国内学校插班一天', '看中文动画片', '成语故事会', '中秋节做月饼',
   '和国内小朋友打游戏', '去动物园', '坐高铁旅行', '逛夜市', '学写毛笔字', '介绍我住的城市',
   '过生日', '当小导游', '我的梦想', '讨论喜欢的书', '保护环境', '回顾与展望',
-].map((t) => ({ title: `实战：${t}`, grammar: ['综合运用'], scene: t, practice: true }));
+].map((t, i) => ({
+  title: `实战：${t}`, grammar: ['综合运用'], scene: t, practice: true,
+  title_en: `Practice: ${PRACTICE_EN[i]}`, scene_en: PRACTICE_EN[i],
+}));
 
 export default {
   id: 'zh',
   name: '中文',
+  name_en: 'Chinese',
+  // 学中文的是海外长大的孩子，默认用英文界面（设置里可以改）
+  defaultUi: 'en',
   flag: '🇨🇳',
   bcp47: 'zh-CN',
   htmlLang: 'zh-CN',
   appTitle: '中文口语教练',
+  appTitle_en: 'Chinese Speaking Coach',
   readingLabel: '拼音',
+  readingLabel_en: 'pinyin',
   sample: '你好！我们一起来练习说中文吧。',
+  // 周测评和自由对话里学生说的第一句（API 要求对话由学生先开口）
+  greeting: '你好！',
   voiceRe: /natural|google|tingting|xiaoxiao|yaoyao|huihui|yunxi/i,
   voicePrefer: /zh[-_]cn|cmn/i,
   voiceInstall: { android: '中文（中国）/ 普通话', ios: '中文（普通话 - 中国大陆）' },
+  voiceInstall_en: { android: 'Chinese (China) / Mandarin', ios: 'Chinese (Mandarin - China mainland)' },
   levels: LEVELS,
   selfCheck: {
     q: '孩子现在的中文怎么样？',
+    q_en: 'How is your Chinese right now?',
     options: [
-      { label: '只能听懂一点，几乎不会说' },
-      { label: '能听懂日常的话，会说简单的句子' },
-      { label: '日常交流基本没问题' },
+      { label: '只能听懂一点，几乎不会说', label_en: 'I understand a little, but can hardly speak' },
+      { label: '能听懂日常的话，会说简单的句子', label_en: 'I understand everyday talk and can say simple sentences' },
+      { label: '日常交流基本没问题', label_en: 'I can handle everyday conversations' },
     ],
   },
   placement: PLACEMENT_ITEMS,

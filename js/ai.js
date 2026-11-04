@@ -1,6 +1,6 @@
 // Claude API：生成课程、情景对话陪练、纠错总结、口语评估
 import Anthropic from 'https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk/+esm';
-import { S, L, save } from './store.js';
+import { S, L, save, T, uiLang } from './store.js';
 
 export const hasKey = () => !!S().settings.apiKey;
 
@@ -8,7 +8,7 @@ let client = null;
 let clientKey = '';
 function getClient() {
   const key = S().settings.apiKey;
-  if (!key) throw new Error('请先在「设置」里填写 Claude API Key');
+  if (!key) throw new Error(T('请先在「设置」里填写 Claude API Key', 'Please enter your Claude API key in Settings first.'));
   if (!client || clientKey !== key) {
     // API Key 只保存在本机浏览器里，由浏览器直接请求 Anthropic API
     client = new Anthropic({ apiKey: key, dangerouslyAllowBrowser: true });
@@ -26,14 +26,15 @@ const OPUS = 'claude-opus-5-5';
 const SONNET = 'claude-sonnet-5-5';
 const HAIKU = 'claude-haiku-5-5';
 const ROUTES = {
-  lesson: { name: '课程生成', model: OPUS, effort: 'medium' },
-  speaking: { name: '水平评估', model: OPUS, effort: 'medium' },
-  chat: { name: 'AI 对话', model: SONNET, effort: 'low' },
-  summary: { name: '对话复盘', model: SONNET, effort: 'medium' },
-  pron: { name: '发音检查', model: HAIKU, effort: 'low' },
-  lookup: { name: '点词查询', model: HAIKU, effort: 'low' },
+  lesson: { name: ['课程生成', 'Lessons'], model: OPUS, effort: 'medium' },
+  speaking: { name: ['水平评估', 'Level test'], model: OPUS, effort: 'medium' },
+  chat: { name: ['AI 对话', 'AI conversation'], model: SONNET, effort: 'low' },
+  summary: { name: ['对话复盘', 'Conversation review'], model: SONNET, effort: 'medium' },
+  pron: { name: ['发音检查', 'Pronunciation check'], model: HAIKU, effort: 'low' },
+  lookup: { name: ['点词查询', 'Word lookup'], model: HAIKU, effort: 'low' },
 };
-export const ROUTE_NAMES = Object.fromEntries(Object.entries(ROUTES).map(([k, v]) => [k, v.name]));
+export const ROUTE_IDS = Object.keys(ROUTES);
+export const routeName = (id) => T(...ROUTES[id].name);
 function routeModel(route) {
   const plan = S().settings.modelPlan;
   if (plan === 'opus') return OPUS;
@@ -88,15 +89,15 @@ async function askJSON({ route, system, messages, schema, cache = false }) {
   try {
     res = await getClient().beta.messages.create(params);
   } catch (e) {
-    if (e instanceof Anthropic.AuthenticationError) throw new Error('API Key 无效，请在「设置」里检查');
-    if (e instanceof Anthropic.RateLimitError) throw new Error('请求太频繁或额度不足，请稍后再试');
-    if (e instanceof Anthropic.APIConnectionError) throw new Error('网络连接失败，请检查网络');
-    if (e instanceof Anthropic.APIError) throw new Error(`API 错误（${e.status}）：${e.message}`);
+    if (e instanceof Anthropic.AuthenticationError) throw new Error(T('API Key 无效，请在「设置」里检查', 'The API key is not valid. Please check it in Settings.'));
+    if (e instanceof Anthropic.RateLimitError) throw new Error(T('请求太频繁或额度不足，请稍后再试', 'Too many requests or not enough credit. Please try again later.'));
+    if (e instanceof Anthropic.APIConnectionError) throw new Error(T('网络连接失败，请检查网络', 'Network error. Please check your internet connection.'));
+    if (e instanceof Anthropic.APIError) throw new Error(T(`API 错误（${e.status}）：${e.message}`, `API error (${e.status}): ${e.message}`));
     throw e;
   }
   recordUsage(route, res);
-  if (res.stop_reason === 'refusal') throw new Error('模型拒绝了这次请求，请换个说法再试');
-  if (res.stop_reason === 'max_tokens') throw new Error('回复过长被截断，请重试');
+  if (res.stop_reason === 'refusal') throw new Error(T('模型拒绝了这次请求，请换个说法再试', 'The model declined this request. Please try saying it differently.'));
+  if (res.stop_reason === 'max_tokens') throw new Error(T('回复过长被截断，请重试', 'The reply was too long and got cut off. Please try again.'));
   const text = res.content.filter((b) => b.type === 'text').map((b) => b.text).join('');
   return JSON.parse(text);
 }
@@ -114,7 +115,15 @@ function fieldNote() {
   const note = id === 'ja' ? '' : `注意：字段名里的 “ja”（如 ja、reply_ja、corrected_ja）只是历史命名，内容一律写${name}，不是日语。
 `;
   return `${note}${ai.readingRule}
-${ai.glossRule}`;
+${ai.glossRule}${explNote()}`;
+}
+
+// 英文界面：学生看不懂中文说明，所有说明都要用英文写（要学的句子本身不变）。
+// 这条放在提示词最后，覆盖前面“用中文说明”“中文翻译”之类的要求
+function explNote() {
+  if (uiLang() !== 'en') return '';
+  return `
+【说明语言：英文】学生看不懂中文说明。所有给学生看的说明、翻译、提示、评价和练习方法——也就是所有以 _zh 结尾的字段，以及 zh 字段——都必须用简单易懂的英文书写（字段名里的 zh 只是历史命名）。上文里“用中文说明”“中文翻译”等要求一律改为英文。要学的${L().name}句子本身（ja、reply_ja、corrected_ja 等字段）和读音照旧。`;
 }
 
 // ---------- 每日课程 ----------
@@ -244,7 +253,7 @@ function storePron(key, value) {
 
 export function pronunciationFeedback({ ja, reading, heard }) {
   const { name, ai } = L();
-  const system = `你是${name}发音教练，学生是${ai.learner}。你用中文说明，说话简短、具体、鼓励人。`;
+  const system = `你是${name}发音教练，学生是${ai.learner}。你用中文说明，说话简短、具体、鼓励人。${explNote()}`;
   const user = `目标句：${ja}
 读音：${reading || ja}
 语音识别把学生的跟读识别成（按可信度排序）：
@@ -255,7 +264,8 @@ ${heard.map((h, i) => `${i + 1}. ${h}`).join('\n')}
 - problems：最多 3 条。part 写目标句里出问题的那几个字或词（照抄目标句里的写法）；issue_zh 说明听起来像读成了什么、最可能的原因（例如${ai.pronIssues}）；how_zh 给一个具体的练习方法。识别结果和目标句基本一致时返回空数组。
 - tip_zh：一句话，下一次跟读最该注意什么。
 ${ai.pitchNote}不要编造识别结果里看不出来的问题。`;
-  const key = `${L().id}|${ja}|${heard.join('|')}`;
+  // 界面语言不同，说明的语言也不同，所以缓存要分开
+  const key = `${L().id}|${uiLang()}|${ja}|${heard.join('|')}`;
   const hit = cachedPron(key);
   if (hit) return Promise.resolve(hit);
   if (pending.has(key)) return pending.get(key);
@@ -279,7 +289,7 @@ const WORD_SCHEMA = obj({
 
 export function lookupWord({ word, sentence }) {
   const { name, ai } = L();
-  const system = `你是${name}词典，给${ai.learner}用，用中文解释，简洁准确。`;
+  const system = `你是${name}词典，给${ai.learner}用，用中文解释，简洁准确。${explNote()}`;
   const user = `学生在这句${name}里点了一个词，请解释它在这句话里的意思。
 句子：${sentence}
 点的词：${word}
@@ -300,7 +310,7 @@ const SPEAKING_SCHEMA = obj({ speaking_level: { type: 'integer' }, comment_zh: s
 export function evalSpeaking(qa) {
   const { name, ai, levels: lvList } = L();
   const levels = lvList.map((l) => `${l.id}=${l.name}（${l.desc}）`).join('；');
-  const system = `你是${name}口语水平评估专家，学生是${ai.learner}。回答可能来自语音识别，忽略同音字识别错误。`;
+  const system = `你是${name}口语水平评估专家，学生是${ai.learner}。回答可能来自语音识别，忽略同音字识别错误。${explNote()}`;
   const user = `学生回答了 5 个难度递增的${name}问题（“（跳过）”表示没听懂或答不出）：
 ${qa.map((x, i) => `Q${i + 1}：${x.q}\nA${i + 1}：${x.a || '（跳过）'}`).join('\n')}
 

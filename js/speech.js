@@ -1,5 +1,5 @@
 // 朗读（speechSynthesis）与语音识别（SpeechRecognition），语言跟随当前学习的语言
-import { S, L } from './store.js';
+import { S, L, T, LX } from './store.js';
 
 let voice = null;
 let voiceLang = '';
@@ -75,16 +75,23 @@ export function ttsDiagnosis() {
   const ua = navigator.userAgent;
   const ios = /iPhone|iPad|iPod/.test(ua);
   const lines = [];
-  if (!ttsSupported) return '这个浏览器不支持语音朗读。安卓请用 Chrome，iPhone 请用 Safari。';
-  const { name, voiceInstall } = L();
-  lines.push(voice ? `✅ 已找到${name}语音：${voice.name}` : `❌ 没有找到${name}语音（共 ${voiceCount} 个语音）`);
-  if (lastError) lines.push(`上次朗读出错：${lastError}`);
+  if (!ttsSupported) return T('这个浏览器不支持语音朗读。安卓请用 Chrome，iPhone 请用 Safari。', 'This browser cannot read text aloud. Use Chrome on Android or Safari on iPhone.');
+  const name = LX(L(), 'name');
+  const voiceInstall = LX(L(), 'voiceInstall');
+  lines.push(voice
+    ? T(`✅ 已找到${name}语音：${voice.name}`, `✅ Found a ${name} voice: ${voice.name}`)
+    : T(`❌ 没有找到${name}语音（共 ${voiceCount} 个语音）`, `❌ No ${name} voice found (${voiceCount} voices in total)`));
+  if (lastError) lines.push(T(`上次朗读出错：${lastError}`, `Last playback error: ${lastError}`));
   if (!voice) {
     lines.push(ios
-      ? `请到「设置 → 辅助功能 → 朗读内容 → 声音 → ${voiceInstall.ios}」下载一个声音。`
-      : `请到手机「设置 → 系统 → 语言 → 文字转语音输出」（找不到可在设置里搜“文字转语音”），首选引擎选「Google 语音服务」，点齿轮 → 安装语音数据 → 下载「${voiceInstall.android}」，然后完全关闭并重新打开 Chrome。`);
+      ? T(`请到「设置 → 辅助功能 → 朗读内容 → 声音 → ${voiceInstall.ios}」下载一个声音。`,
+        `Go to Settings → Accessibility → Spoken Content → Voices → ${voiceInstall.ios} and download a voice.`)
+      : T(`请到手机「设置 → 系统 → 语言 → 文字转语音输出」（找不到可在设置里搜“文字转语音”），首选引擎选「Google 语音服务」，点齿轮 → 安装语音数据 → 下载「${voiceInstall.android}」，然后完全关闭并重新打开 Chrome。`,
+        `Go to Settings → System → Languages → Text-to-speech output (or search for "text-to-speech" in Settings). Choose "Speech Services by Google", tap the gear → Install voice data → download "${voiceInstall.android}", then fully close and reopen Chrome.`));
   }
-  lines.push(ios ? '另外请确认：手机侧面的静音开关已关闭，媒体音量已调大。' : '另外请确认：媒体音量已调大（按音量键时调的是“媒体”而不是铃声）。');
+  lines.push(ios
+    ? T('另外请确认：手机侧面的静音开关已关闭，媒体音量已调大。', 'Also check that the silent switch on the side of the phone is off and the volume is up.')
+    : T('另外请确认：媒体音量已调大（按音量键时调的是“媒体”而不是铃声）。', 'Also check that the media volume is up (not just the ringtone volume).'));
   return lines.join('\n');
 }
 
@@ -92,15 +99,23 @@ const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
 export const sttSupported = !!Rec;
 
 const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-const ERRORS = {
-  'not-allowed': '没有麦克风权限，请在浏览器设置里允许本网站使用麦克风',
-  'no-speech': '没听到声音，再试一次',
-  'audio-capture': '麦克风被占用或无法使用',
-  network: '语音识别需要联网',
-  // iPhone 的语音识别借用系统的“听写”功能，没开听写或麦克风正被占用时会被中断
-  aborted: IOS ? '语音识别被系统中断了，再试一次。如果一直这样，请到 iPhone「设置 → 通用 → 键盘」打开「启用听写」' : '语音识别被中断了，再试一次',
-  'service-not-allowed': IOS ? 'iPhone 的语音识别没有打开：请到「设置 → 通用 → 键盘」打开「启用听写」，再完全关闭并重新打开 App' : '语音识别服务不可用',
-};
+// 识别出错时给用户看的说明（按界面语言）
+function errorText(code) {
+  switch (code) {
+    case 'not-allowed': return T('没有麦克风权限，请在浏览器设置里允许本网站使用麦克风', 'No microphone permission. Please allow this site to use the microphone in your browser settings.');
+    case 'no-speech': return T('没听到声音，再试一次', "Didn't hear anything. Please try again.");
+    case 'audio-capture': return T('麦克风被占用或无法使用', 'The microphone is busy or not available.');
+    case 'network': return T('语音识别需要联网', 'Speech recognition needs an internet connection.');
+    // iPhone 的语音识别借用系统的“听写”功能，没开听写或麦克风正被占用时会被中断
+    case 'aborted': return IOS
+      ? T('语音识别被系统中断了，再试一次。如果一直这样，请到 iPhone「设置 → 通用 → 键盘」打开「启用听写」', 'Speech recognition was interrupted. Try again. If it keeps happening, turn on Settings → General → Keyboard → Enable Dictation.')
+      : T('语音识别被中断了，再试一次', 'Speech recognition was interrupted. Please try again.');
+    case 'service-not-allowed': return IOS
+      ? T('iPhone 的语音识别没有打开：请到「设置 → 通用 → 键盘」打开「启用听写」，再完全关闭并重新打开 App', 'Speech recognition is off on this iPhone. Turn on Settings → General → Keyboard → Enable Dictation, then fully close and reopen the app.')
+      : T('语音识别服务不可用', 'Speech recognition is not available.');
+    default: return T(`识别出错：${code}`, `Speech recognition error: ${code}`);
+  }
+}
 
 // 录音格式：iPhone Safari 只支持 audio/mp4，用默认格式时可能录不到声音
 function newRecorder(stream) {
@@ -124,7 +139,7 @@ function recognizeOnce(track) {
     };
     r.onerror = (e) => {
       done = true;
-      const err = new Error(ERRORS[e.error] || `识别出错：${e.error}`);
+      const err = new Error(errorText(e.error));
       err.code = e.error;
       reject(err);
     };
@@ -142,7 +157,7 @@ function recognizeOnce(track) {
 
 // 录一句话，返回识别出的文本
 export function listen() {
-  if (!Rec) return Promise.reject(new Error('当前浏览器不支持语音识别，请用 Chrome / Edge / Safari，或直接打字'));
+  if (!Rec) return Promise.reject(new Error(T('当前浏览器不支持语音识别，请用 Chrome / Edge / Safari，或直接打字', 'This browser does not support speech recognition. Use Chrome, Edge or Safari, or type instead.')));
   speechSynthesis.cancel();
   return recognizeOnce(null);
 }
@@ -154,7 +169,11 @@ export function listen() {
 // 某个方式识别成功过一次就“确认”，之后再听不到声音就当作用户真的没说话，不再降级
 const MODE_KEY = 'nihongo-coach-rec-mode';
 const MODES = ['track', 'parallel', 'off'];
-const MODE_NAMES = { track: '录音并识别（方式 1）', parallel: '录音并识别（方式 2）', off: '只识别，不录音' };
+const modeName = (m) => ({
+  track: T('录音并识别（方式 1）', 'Record and recognize (method 1)'),
+  parallel: T('录音并识别（方式 2）', 'Record and recognize (method 2)'),
+  off: T('只识别，不录音', 'Recognize only, no recording'),
+})[m];
 // iPhone 上语音识别和录音不能同时用麦克风，直接从“只识别”开始；回放用“录一遍听听”
 let recMode = IOS ? { mode: 'off', confirmed: true } : { mode: 'track', confirmed: false };
 try {
@@ -167,12 +186,12 @@ function setMode(mode, confirmed) {
   try { localStorage.setItem(MODE_KEY, JSON.stringify(recMode)); } catch {}
 }
 export const canRecord = () => recMode.mode !== 'off' && !!window.MediaRecorder && !!navigator.mediaDevices?.getUserMedia;
-export const recordModeInfo = () => `${MODE_NAMES[recMode.mode]}${recMode.confirmed ? '' : '（检测中）'}`;
+export const recordModeInfo = () => `${modeName(recMode.mode)}${recMode.confirmed ? '' : T('（检测中）', ' (testing)')}`;
 export const resetRecordMode = () => (IOS ? setMode('off', true) : setMode('track', false));
 
 // 跟读一次：同时录音（用于回放）和识别（用于打分）
 export async function recordAttempt() {
-  if (!Rec) throw new Error('当前浏览器不支持语音识别，请用 Chrome 或 Safari');
+  if (!Rec) throw new Error(T('当前浏览器不支持语音识别，请用 Chrome 或 Safari', 'This browser does not support speech recognition. Use Chrome or Safari.'));
   speechSynthesis.cancel();
   const mode = canRecord() ? recMode.mode : 'off';
   let stream = null;
@@ -185,7 +204,7 @@ export async function recordAttempt() {
       rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
       rec.start(REC_SLICE_MS);
     } catch (e) {
-      if (e.name === 'NotAllowedError') throw new Error(ERRORS['not-allowed']);
+      if (e.name === 'NotAllowedError') throw new Error(errorText('not-allowed'));
       stream = null;
       rec = null;
     }
@@ -207,8 +226,8 @@ export async function recordAttempt() {
     const next = MODES[MODES.indexOf(mode) + 1] || 'off';
     setMode(next, false);
     return new Error(next === 'off'
-      ? '这台手机不能同时录音和识别，已关闭“我的录音”回放，请再说一次'
-      : '这台手机的录音和识别冲突了，已自动换一种方式，请再说一次');
+      ? T('这台手机不能同时录音和识别，已关闭“我的录音”回放，请再说一次', "This phone can't record and recognize at the same time, so \"My recording\" playback is off. Please say it again.")
+      : T('这台手机的录音和识别冲突了，已自动换一种方式，请再说一次', 'Recording and recognition clashed on this phone. Switched to another method; please say it again.'));
   };
   try {
     const alts = await recognizeOnce(mode === 'track' ? stream?.getAudioTracks()[0] : null);
@@ -295,7 +314,7 @@ export async function recordSelf() {
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
   } catch (e) {
-    throw new Error(e.name === 'NotAllowedError' ? ERRORS['not-allowed'] : '无法打开麦克风');
+    throw new Error(e.name === 'NotAllowedError' ? errorText('not-allowed') : T('无法打开麦克风', 'Could not open the microphone.'));
   }
   const rec = newRecorder(stream);
   const chunks = [];

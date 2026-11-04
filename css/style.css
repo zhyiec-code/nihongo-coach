@@ -115,7 +115,7 @@ label.check input { width: auto; margin: 0; }
 .reading { color: var(--muted); font-size: .85rem; margin-left: 38px; }
 .zh { margin-left: 38px; font-size: .92rem; cursor: pointer; border-radius: 6px; }
 .zh:not(.shown) { color: transparent; background: var(--line); user-select: none; }
-.zh:not(.shown)::after { content: "点击显示中文"; color: var(--muted); font-size: .75rem; position: relative; margin-left: -6em; }
+.zh:not(.shown)::after { content: attr(data-hint); color: var(--muted); font-size: .75rem; position: relative; margin-left: -6em; }
 .note { margin-left: 38px; font-size: .85rem; color: var(--muted); }
 .say { flex: none; width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--line); background: var(--bg); cursor: pointer; font-size: .85rem; padding: 0; }
 .say.sm { width: 24px; height: 24px; font-size: .7rem; vertical-align: middle; }

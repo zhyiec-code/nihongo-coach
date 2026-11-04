@@ -137,12 +137,15 @@ const PRACTICE_UNITS = [
 export default {
   id: 'ja',
   name: '日语',
+  name_en: 'Japanese',
   flag: '🇯🇵',
   bcp47: 'ja-JP',
   htmlLang: 'ja',
   appTitle: '日语口语教练',
   readingLabel: '平假名读音',
   sample: 'こんにちは。一緒に日本語を練習しましょう。',
+  // 周测评和自由对话里学生说的第一句（API 要求对话由学生先开口）
+  greeting: 'よろしくお願いします。',
   voiceRe: /natural|google|kyoko|o-ren|nanami/i,
   voiceInstall: { android: '日本語', ios: '日语' },
   levels: LEVELS,
