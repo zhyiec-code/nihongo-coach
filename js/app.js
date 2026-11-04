@@ -9,6 +9,7 @@ import {
 import {
   speak, listen, recordAttempt, similarity, diffChars, sttSupported, ttsSupported, hasVoice, ttsDiagnosis,
   recordModeInfo, resetRecordMode, canSelfRecord, recordSelf, stopSelfRecording, isSelfRecording,
+  stopListening, cancelListening, isListening,
 } from './speech.js';
 import {
   hasKey, generateLesson, chatSystem, chatTurn, summarize, evalSpeaking, pronunciationFeedback, lookupWord, ROUTE_IDS, routeName,
@@ -180,10 +181,11 @@ function bindShadowMics(root, getTargets, onProgress) {
     let myAudio = null;
     btn.onclick = async () => {
       if (isSelfRecording()) return;
+      if (btn.classList.contains('listening')) return stopListening(); // 再点一次：说完了
+      if (isListening()) return;
       const [ja, reading] = getTargets(i);
-      btn.disabled = true;
       btn.classList.add('listening');
-      btn.textContent = T('🎤 请开始说…', '🎤 Start speaking…');
+      btn.textContent = T('🎤 请开始说…（说完点这里）', '🎤 Speak now… (tap when done)');
       try {
         const { alts, audioUrl } = await recordAttempt();
         if (myAudio) URL.revokeObjectURL(myAudio);
@@ -244,7 +246,6 @@ function bindShadowMics(root, getTargets, onProgress) {
       } catch (e) {
         out.innerHTML = `<div class="pr-result fail">${esc(e.message)}</div>`;
       } finally {
-        btn.disabled = false;
         btn.classList.remove('listening');
         btn.textContent = tries ? T('🎤 再读一次', '🎤 Try again') : label;
       }
@@ -284,6 +285,7 @@ const routes = {
 let leaveHook = null;
 function router() {
   speechSynthesis?.cancel?.();
+  cancelListening();
   closeWordSheet();
   if (leaveHook) leaveHook();
   leaveHook = null;
@@ -495,8 +497,9 @@ function viewTest() {
     if (sttSupported) {
       $('#rec').onclick = async () => {
         const btn = $('#rec');
+        if (btn.classList.contains('listening')) return stopListening(); // 再点一次：说完了
         btn.classList.add('listening');
-        btn.textContent = T('🎤 正在听…', '🎤 Listening…');
+        btn.textContent = T('🎤 正在听…（说完点这里）', '🎤 Listening… (tap when done)');
         try {
           const heard = await listen();
           if (heard[0]) $('#ans').value = heard[0];
@@ -507,8 +510,8 @@ function viewTest() {
         btn.textContent = T('🎤 重新说', '🎤 Say it again');
       };
     }
-    $('#skip').onclick = () => { t.qa.push({ q, a: '' }); showSpeak(i + 1); };
-    $('#next').onclick = () => { t.qa.push({ q, a: $('#ans').value.trim() }); showSpeak(i + 1); };
+    $('#skip').onclick = () => { cancelListening(); t.qa.push({ q, a: '' }); showSpeak(i + 1); };
+    $('#next').onclick = () => { cancelListening(); t.qa.push({ q, a: $('#ans').value.trim() }); showSpeak(i + 1); };
   }
 
   async function evalSpeak() {
@@ -1014,6 +1017,7 @@ function renderChat(box, { system, opening, ss }) {
   if (sttSupported) {
     $('#talk', box).onclick = async () => {
       const b = $('#talk', box);
+      if (b.classList.contains('listening')) return stopListening(); // 再点一次：说完了
       b.classList.add('listening');
       try {
         const heard = await listen();

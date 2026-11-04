@@ -126,26 +126,85 @@ function newRecorder(stream) {
 const REC_SLICE_MS = 250;
 
 // 识别一句话，返回候选文本（按可信度排序）。传入 track 时让识别直接使用这条录音轨道
+// iPhone 的语音识别有时说完了也不会自己结束（不触发 onresult／onend），页面会一直停在“正在听”。
+// 所以用中间结果自己判断：有了内容后 1.5 秒没有新内容就算说完；一直没听到声音 8 秒后停止；
+// 最长 15 秒。调用 stop() 后如果识别器也不回应，1.5 秒后直接用已经听到的内容
+const SILENCE_MS = 1500;
+const NO_SPEECH_MS = 8000;
+const MAX_MS = 15000;
+let activeRec = null;
+
+// 手动结束正在进行的识别（再点一次麦克风时调用），已经听到的内容照常返回
+export function stopListening() {
+  activeRec?.stop();
+}
+// 放弃正在进行的识别（跳过、下一题、离开页面时调用）：立刻结束，听到的内容不要了
+export function cancelListening() {
+  activeRec?.cancel();
+}
+export const isListening = () => !!activeRec;
+
 function recognizeOnce(track) {
   return new Promise((resolve, reject) => {
     const r = new Rec();
     r.lang = L().bcp47;
-    r.interimResults = false;
+    r.interimResults = true;
     r.maxAlternatives = 3;
+    let heard = []; // 目前听到的内容（候选文本，按可信度排序）
     let done = false;
-    r.onresult = (e) => {
+    let idleTimer = null;
+    const finish = (fn) => {
+      if (done) return;
       done = true;
-      resolve(Array.from(e.results[0]).map((a) => a.transcript));
+      clearTimeout(idleTimer);
+      clearTimeout(maxTimer);
+      if (activeRec === handle) activeRec = null;
+      fn();
+    };
+    const stopAndFinish = () => {
+      try { r.stop(); } catch {}
+      setTimeout(() => finish(() => resolve(heard)), SILENCE_MS);
+    };
+    const waitIdle = (ms) => {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(stopAndFinish, ms);
+    };
+    const maxTimer = setTimeout(() => {
+      try { r.abort(); } catch {}
+      finish(() => resolve(heard));
+    }, MAX_MS);
+    const handle = {
+      stop: stopAndFinish,
+      cancel: () => {
+        try { r.abort(); } catch {}
+        finish(() => resolve([]));
+      },
+    };
+    activeRec = handle;
+
+    r.onresult = (e) => {
+      const results = Array.from(e.results);
+      const prefix = results.slice(0, -1).map((x) => x[0].transcript).join('');
+      const last = results[results.length - 1];
+      heard = Array.from(last).map((a) => prefix + a.transcript);
+      if (last.isFinal) {
+        try { r.stop(); } catch {}
+        finish(() => resolve(heard));
+      } else {
+        waitIdle(SILENCE_MS);
+      }
     };
     r.onerror = (e) => {
-      done = true;
-      const err = new Error(errorText(e.error));
-      err.code = e.error;
-      reject(err);
+      // 我们自己调用 stop/abort 时也会报 aborted，这时已经听到的内容照常返回
+      if (heard.length && (e.error === 'aborted' || e.error === 'no-speech')) return finish(() => resolve(heard));
+      finish(() => {
+        const err = new Error(errorText(e.error));
+        err.code = e.error;
+        reject(err);
+      });
     };
-    r.onend = () => {
-      if (!done) resolve([]);
-    };
+    r.onend = () => finish(() => resolve(heard));
+    waitIdle(NO_SPEECH_MS);
     // 新版 Chrome 支持 start(audioTrack)；旧版会忽略参数或报错，此时退回普通 start()
     try {
       track ? r.start(track) : r.start();
