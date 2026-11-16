@@ -195,7 +195,7 @@ function bindShadowMics(root, getTargets, onProgress) {
       btn.classList.add('listening');
       btn.textContent = T('🎤 请开始说…（说完点这里）', '🎤 Speak now… (tap when done)');
       try {
-        const { alts, audioUrl } = await recordAttempt();
+        const { alts, audioUrl } = await recordAttempt(ja);
         if (myAudio) URL.revokeObjectURL(myAudio);
         myAudio = audioUrl;
         if (!alts.length) {

@@ -125,13 +125,18 @@ function newRecorder(stream) {
 // 每 250ms 取一次数据：iPhone 上只在 stop 时取数据有时会拿到空录音
 const REC_SLICE_MS = 250;
 
-// 识别一句话，返回候选文本（按可信度排序）。传入 track 时让识别直接使用这条录音轨道
-// iPhone 的语音识别有时说完了也不会自己结束（不触发 onresult／onend），页面会一直停在“正在听”。
-// 所以用中间结果自己判断：有了内容后 1.5 秒没有新内容就算说完；一直没听到声音 8 秒后停止；
-// 最长 15 秒。调用 stop() 后如果识别器也不回应，1.5 秒后直接用已经听到的内容
-const SILENCE_MS = 1500;
+// 识别一句话，返回候选文本（按可信度排序）。传入 track 时让识别直接使用这条录音轨道。
+// expect 是目标句（跟读、复习时传入），用来判断说完没有。
+// 用连续识别（continuous）：句子之间停顿一下不会被当成说完了。
+// iPhone 的语音识别有时说完了也不会自己结束（不触发 onresult／onend），页面会一直停在“正在听”，
+// 所以用中间结果自己判断：已经说到目标句的大约八成后，停顿 1.2 秒就算说完；还差得多时，停顿 3 秒才算说完
+// （长句中间换气、想下一句时不会被切断）；不知道目标句时停顿 2 秒。
+// 一直没听到声音 8 秒后停止；最长时间按目标句长度放宽。调用 stop() 后如果识别器也不回应，1.5 秒后直接用已经听到的内容
+const SILENCE_DONE_MS = 1200;
+const SILENCE_MID_MS = 3000;
+const SILENCE_MS = 2000;
+const STOP_GRACE_MS = 1500;
 const NO_SPEECH_MS = 8000;
-const MAX_MS = 15000;
 let activeRec = null;
 
 // 手动结束正在进行的识别（再点一次麦克风时调用），已经听到的内容照常返回
@@ -144,10 +149,24 @@ export function cancelListening() {
 }
 export const isListening = () => !!activeRec;
 
-function recognizeOnce(track) {
+// 把连续识别的各段结果拼起来。有的浏览器（iPhone）每一段给的是从头开始的完整内容，这时用后一段替换，不重复拼接
+function joinParts(parts) {
+  return parts.reduce((acc, t) => {
+    const a = acc.trim(), b = (t || '').trim();
+    if (!b) return acc;
+    if (a && b.startsWith(a)) return t;
+    if (a.endsWith(b)) return acc;
+    return acc + t;
+  }, '');
+}
+
+function recognizeOnce(track, expect = '') {
+  const expectLen = norm(expect).length;
+  const maxMs = Math.min(45000, 15000 + expectLen * 400);
   return new Promise((resolve, reject) => {
     const r = new Rec();
     r.lang = L().bcp47;
+    r.continuous = true;
     r.interimResults = true;
     r.maxAlternatives = 3;
     let heard = []; // 目前听到的内容（候选文本，按可信度排序）
@@ -163,16 +182,22 @@ function recognizeOnce(track) {
     };
     const stopAndFinish = () => {
       try { r.stop(); } catch {}
-      setTimeout(() => finish(() => resolve(heard)), SILENCE_MS);
+      setTimeout(() => finish(() => resolve(heard)), STOP_GRACE_MS);
     };
     const waitIdle = (ms) => {
       clearTimeout(idleTimer);
       idleTimer = setTimeout(stopAndFinish, ms);
     };
+    // 说了多少之后停顿多久算说完
+    const silenceMs = () => {
+      if (!expectLen) return SILENCE_MS;
+      const got = Math.max(0, ...heard.map((h) => norm(h).length));
+      return got >= expectLen * 0.8 ? SILENCE_DONE_MS : SILENCE_MID_MS;
+    };
     const maxTimer = setTimeout(() => {
       try { r.abort(); } catch {}
       finish(() => resolve(heard));
-    }, MAX_MS);
+    }, maxMs);
     const handle = {
       stop: stopAndFinish,
       cancel: () => {
@@ -184,15 +209,10 @@ function recognizeOnce(track) {
 
     r.onresult = (e) => {
       const results = Array.from(e.results);
-      const prefix = results.slice(0, -1).map((x) => x[0].transcript).join('');
+      const prefix = joinParts(results.slice(0, -1).map((x) => x[0].transcript));
       const last = results[results.length - 1];
-      heard = Array.from(last).map((a) => prefix + a.transcript);
-      if (last.isFinal) {
-        try { r.stop(); } catch {}
-        finish(() => resolve(heard));
-      } else {
-        waitIdle(SILENCE_MS);
-      }
+      heard = Array.from(last).map((a) => joinParts([prefix, a.transcript]));
+      waitIdle(silenceMs());
     };
     r.onerror = (e) => {
       // 我们自己调用 stop/abort 时也会报 aborted，这时已经听到的内容照常返回
@@ -248,8 +268,8 @@ export const canRecord = () => recMode.mode !== 'off' && !!window.MediaRecorder 
 export const recordModeInfo = () => `${modeName(recMode.mode)}${recMode.confirmed ? '' : T('（检测中）', ' (testing)')}`;
 export const resetRecordMode = () => (IOS ? setMode('off', true) : setMode('track', false));
 
-// 跟读一次：同时录音（用于回放）和识别（用于打分）
-export async function recordAttempt() {
+// 跟读一次：同时录音（用于回放）和识别（用于打分）。expect 是目标句，用来判断说完没有
+export async function recordAttempt(expect = '') {
   if (!Rec) throw new Error(T('当前浏览器不支持语音识别，请用 Chrome 或 Safari', 'This browser does not support speech recognition. Use Chrome or Safari.'));
   speechSynthesis.cancel();
   const mode = canRecord() ? recMode.mode : 'off';
@@ -289,7 +309,7 @@ export async function recordAttempt() {
       : T('这台手机的录音和识别冲突了，已自动换一种方式，请再说一次', 'Recording and recognition clashed on this phone. Switched to another method; please say it again.'));
   };
   try {
-    const alts = await recognizeOnce(mode === 'track' ? stream?.getAudioTracks()[0] : null);
+    const alts = await recognizeOnce(mode === 'track' ? stream?.getAudioTracks()[0] : null, expect);
     const audioUrl = await stopRecording();
     if (alts.length) {
       if (!recMode.confirmed) setMode(mode, true);
