@@ -207,7 +207,7 @@ const SUMMARY_SCHEMA = obj({
   score: { type: 'integer' },
   summary_zh: str,
   strengths_zh: arr(str),
-  mistakes: arr(obj({ wrong: str, correct_ja: str, reading: str, explanation_zh: str })),
+  mistakes: arr(obj({ wrong: str, correct_ja: str, reading: str, zh: str, explanation_zh: str })),
   new_cards: arr(obj({ ja: str, reading: str, zh: str })),
   next_focus_zh: str,
 });
@@ -224,7 +224,7 @@ ${transcript}
 - score：1–5 分的口语表现（1=几乎无法交流，3=能完成任务但错误较多，5=该水平下自然流利）。${weekly ? '这是周测评，请严格打分，它会决定是否需要放慢进度。' : ''}
 - summary_zh：两三句话的总体评价。
 - strengths_zh：做得好的地方（1–3 条）。
-- mistakes：最值得改正的错误（最多 6 条），correct_ja 写正确的整句。
+- mistakes：最值得改正的错误（最多 6 条），correct_ja 写正确的整句；zh 是 correct_ja 这整句话的意思（按上面 zh 的规则），会做成复习卡片的正面，学生要看着它把整句说出来，所以必须完整表达整句的意思，不要写错误分析；explanation_zh 才写错在哪里、为什么。
 - new_cards：从这次对话中挑 3–6 个学生应该记住、能直接用于对话的句子（包括改正后的句子和学生没能说出来的表达）。
 - next_focus_zh：下次练习最该注意的一点。`;
   return askJSON({ system, messages: [{ role: 'user', content: user }], schema: SUMMARY_SCHEMA, route: 'summary' });
@@ -302,6 +302,20 @@ export function lookupWord({ word, sentence }) {
 - usage_zh：一两句话说明在这句里的用法或语法作用；${ai.lookupConfusion}。
 - kanji_zh：${ai.lookupExtra}。`;
   return askJSON({ system, messages: [{ role: 'user', content: user }], schema: WORD_SCHEMA, route: 'lookup' });
+}
+
+// ---------- 给句子补上意思（修复旧版纠错卡片：当时卡片正面误用了错误分析） ----------
+const GLOSS_SCHEMA = obj({ items: arr(obj({ i: { type: 'integer' }, zh: str })) });
+
+export function glossSentences(sentences) {
+  const { name, ai } = L();
+  const system = `你帮${ai.learner}制作${name}口语复习卡片。${fieldNote()}`;
+  const user = `下面每一句${name}都要写出它的意思（zh），作为复习卡片的正面：学生看着 zh 要能把整句${name}说出来，所以 zh 要完整对应整句的意思，不要写语法分析或解释。
+${sentences.map((s, i) => `${i}. ${s}`).join('\n')}
+
+items 里按编号 i 逐句返回。`;
+  return askJSON({ system, messages: [{ role: 'user', content: user }], schema: GLOSS_SCHEMA, route: 'lookup' })
+    .then((r) => r.items);
 }
 
 // ---------- 分级测试中的口语评估 ----------

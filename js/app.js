@@ -12,7 +12,7 @@ import {
   stopListening, cancelListening, isListening,
 } from './speech.js';
 import {
-  hasKey, generateLesson, chatSystem, chatTurn, summarize, evalSpeaking, pronunciationFeedback, lookupWord, ROUTE_IDS, routeName,
+  hasKey, generateLesson, chatSystem, chatTurn, summarize, glossSentences, evalSpeaking, pronunciationFeedback, lookupWord, ROUTE_IDS, routeName,
 } from './ai.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -43,6 +43,14 @@ function jaBlock({ ja, reading, zh, note }, { big = false, showZh = false } = {}
     ${zh ? `<div class="zh ${showZh ? 'shown' : ''}" data-reveal data-hint="${T('点击显示中文', 'Tap to show the meaning')}">${esc(zh)}</div>` : ''}
     ${note ? `<div class="note">💡 ${esc(note)}</div>` : ''}
   </div>`;
+}
+
+// 复盘里的一条错误 → 复习卡片：正面是整句的意思，错误分析放到答案里
+function mistakeCard(m) {
+  return { ja: m.correct_ja, reading: m.reading, zh: m.zh || '', expl: m.explanation_zh, note: `${T('之前说成', 'You said')}${COLON()}${m.wrong}` };
+}
+function mistakeHtml(m) {
+  return `<div class="mistake"><div class="wrong" lang="${HL()}">✗ ${esc(m.wrong)}</div>${jaBlock({ ja: m.correct_ja, reading: m.reading, zh: m.zh, note: m.explanation_zh }, { showZh: true })}</div>`;
 }
 
 // 把句子切成可点击的词（浏览器自带的分词，按当前语言）
@@ -751,7 +759,7 @@ async function viewSession(arg) {
       ss.summary = await summarize({ level: info.level, transcript: transcriptText(ss.transcript), weekly: info.weekly, unit: info.unit });
       const s = ss.summary;
       const n = addCards([
-        ...s.mistakes.map((m) => ({ ja: m.correct_ja, reading: m.reading, zh: m.explanation_zh, note: `${T('之前说成', 'You said')}${COLON()}${m.wrong}` })),
+        ...s.mistakes.map(mistakeCard),
         ...s.new_cards,
       ], `d${day}`);
       s.addedCards = n;
@@ -777,7 +785,7 @@ async function viewSession(arg) {
         ${advice ? `<p class="comment">${esc(advice)}</p>` : ''}
         <h3>${T('做得好的', 'What went well')}</h3><ul>${s.strengths_zh.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>
         <h3>${T('需要改正的', 'To fix')}</h3>
-        ${s.mistakes.length ? s.mistakes.map((m) => `<div class="mistake"><div class="wrong" lang="${HL()}">✗ ${esc(m.wrong)}</div>${jaBlock({ ja: m.correct_ja, reading: m.reading, zh: m.explanation_zh }, { showZh: true })}</div>`).join('') : `<p>${T('没有明显错误 👍', 'No obvious mistakes 👍')}</p>`}
+        ${s.mistakes.length ? s.mistakes.map(mistakeHtml).join('') : `<p>${T('没有明显错误 👍', 'No obvious mistakes 👍')}</p>`}
         <h3>${T('下次重点', 'Focus next time')}</h3><p>${esc(s.next_focus_zh)}</p>
         <p class="hint">${T(`已把 ${s.addedCards ?? 0} 个句子加入复习卡片。`, `Added ${s.addedCards ?? 0} sentences to your review cards.`)}</p>
       </section>`;
@@ -854,7 +862,31 @@ function renderKana(box, info) {
 }
 
 // ---------- 复习（SRS）----------
-function renderReview(box, cardsOverride) {
+// 旧版的纠错卡片把错误分析当成了正面（看不出要说哪句话）。
+// 复习前一次性请 AI 补上整句的意思，原来的分析挪到答案里
+const isLegacyMistake = (c) => c.expl === undefined && /^(之前说成|You said)/.test(c.note || '');
+async function fixLegacyCards() {
+  const old = S().cards.filter(isLegacyMistake);
+  if (!old.length || !hasKey()) return;
+  for (let k = 0; k < old.length; k += 40) {
+    const part = old.slice(k, k + 40);
+    const items = await glossSentences(part.map((c) => c.ja));
+    for (const { i, zh } of items) {
+      const c = part[i];
+      if (!c || !zh) continue;
+      c.expl = c.zh;
+      c.zh = zh;
+    }
+  }
+  save();
+}
+
+async function renderReview(box, cardsOverride) {
+  if (S().cards.some(isLegacyMistake) && hasKey()) {
+    box.innerHTML = `<div class="rv-fixing">${spinner(T('正在给旧的纠错卡片补上中文意思…', 'Adding the meaning to older correction cards…'))}</div>`;
+    try { await fixLegacyCards(); } catch (e) { console.warn('补全旧卡片失败', e); }
+    if (!box.isConnected || !$('.rv-fixing', box)) return; // 等待期间已经切到别的步骤
+  }
   const list = cardsOverride ? shuffle(cardsOverride).slice(0, 60) : dueCards();
   let i = 0;
   if (!list.length) {
@@ -873,7 +905,7 @@ function renderReview(box, cardsOverride) {
         <div class="srs-front">${esc(c.zh)}</div>
         ${c.note ? `<div class="note">💡 ${esc(c.note)}</div>` : ''}
         ${sttSupported ? micButton(T(`说出${LN()}`, 'Say it')) : ''}
-        <div id="back" hidden>${jaBlock(c, { big: true })}</div>
+        <div id="back" hidden>${jaBlock(c, { big: true })}${c.expl ? `<div class="note">✏️ ${esc(c.expl)}</div>` : ''}</div>
         <button class="btn block" id="show">${T('显示答案', 'Show answer')}</button>
         <div class="grades" hidden>
           <button class="btn g0" data-g="0">${T('忘了', 'Forgot')}<small>${T('10 分钟', '10 min')}</small></button>
@@ -1061,9 +1093,9 @@ function viewChat() {
       $('#sumbox').innerHTML = spinner(T('正在复盘…', 'Reviewing…'));
       try {
         const s = await summarize({ level, transcript: transcriptText(ss.transcript), weekly: false, unit: { title: topic || '自由对话' } });
-        const n = addCards([...s.mistakes.map((m) => ({ ja: m.correct_ja, reading: m.reading, zh: m.explanation_zh, note: `${T('之前说成', 'You said')}${COLON()}${m.wrong}` })), ...s.new_cards], 'chat');
+        const n = addCards([...s.mistakes.map(mistakeCard), ...s.new_cards], 'chat');
         $('#sumbox').innerHTML = `<p>${'★'.repeat(s.score)}${'☆'.repeat(5 - s.score)} ${esc(s.summary_zh)}</p>
-          ${s.mistakes.map((m) => `<div class="mistake"><div class="wrong" lang="${HL()}">✗ ${esc(m.wrong)}</div>${jaBlock({ ja: m.correct_ja, reading: m.reading, zh: m.explanation_zh }, { showZh: true })}</div>`).join('')}
+          ${s.mistakes.map(mistakeHtml).join('')}
           <p class="hint">${T(`已加入 ${n} 张复习卡片。`, `Added ${n} review cards.`)}</p>`;
       } catch (e) {
         $('#sumbox').innerHTML = errorBox(e.message);

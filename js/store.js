@@ -164,6 +164,7 @@ export function addCards(list, source) {
     state.cards.push({
       id: crypto.randomUUID?.() || String(Date.now() + Math.random()),
       ja: c.ja, reading: c.reading || '', zh: c.zh || '', note: c.note || '',
+      ...(c.expl ? { expl: c.expl } : {}), // 纠错卡片的错误分析，看答案时才显示
       source, ease: 2.5, interval: 0, reps: 0, due: Date.now(), lapses: 0,
     });
     added++;
