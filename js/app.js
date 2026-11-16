@@ -865,8 +865,46 @@ function renderKana(box, info) {
 // 旧版的纠错卡片把错误分析当成了正面（看不出要说哪句话）。
 // 复习前一次性请 AI 补上整句的意思，原来的分析挪到答案里
 const isLegacyMistake = (c) => c.expl === undefined && /^(之前说成|You said)/.test(c.note || '');
+// 旧版复盘有时把几句话用“／”拼成一张卡片，拆成每句一张（复习进度沿用原卡片）。
+// 中文意思能一一对应就直接拆，对应不上的留空，由下面的 fixLegacyCards 请 AI 补上
+const SPLIT_RE = /\s*／\s*/;
+function splitCombinedCards() {
+  const cards = S().cards;
+  const have = new Set(cards.map((c) => c.ja));
+  let changed = false;
+  for (let k = cards.length - 1; k >= 0; k--) {
+    const c = cards[k];
+    const jas = c.ja.split(SPLIT_RE).filter(Boolean);
+    if (jas.length < 2) continue;
+    const pick = (text, prefix = '') => {
+      const parts = (text || '').slice(prefix.length).split(SPLIT_RE).filter(Boolean);
+      return parts.length === jas.length ? parts.map((p) => prefix + p) : null;
+    };
+    // 旧版纠错卡片的正面是错误分析，不是意思：整段挪到答案里，意思请 AI 补
+    const legacy = isLegacyMistake(c);
+    const zhs = legacy ? null : pick(c.zh);
+    const readings = pick(c.reading);
+    const notePrefix = (c.note || '').match(/^(之前说成|You said)\s*[：:]\s*/)?.[0] || '';
+    const notes = notePrefix ? pick(c.note, notePrefix) : null;
+    const pieces = jas.map((ja, j) => ({
+      ...c,
+      id: j === 0 ? c.id : (crypto.randomUUID?.() || String(Date.now() + Math.random() + j)),
+      ja,
+      reading: readings ? readings[j] : '',
+      zh: zhs ? zhs[j] : '',
+      note: notes ? notes[j] : c.note,
+      needGloss: !zhs || undefined,
+      ...(legacy ? { expl: c.zh } : {}),
+    })).filter((p, j) => j === 0 || !have.has(p.ja));
+    pieces.forEach((p) => have.add(p.ja));
+    cards.splice(k, 1, ...pieces);
+    changed = true;
+  }
+  if (changed) save();
+}
+
 async function fixLegacyCards() {
-  const old = S().cards.filter(isLegacyMistake);
+  const old = S().cards.filter((c) => isLegacyMistake(c) || c.needGloss);
   if (!old.length || !hasKey()) return;
   for (let k = 0; k < old.length; k += 40) {
     const part = old.slice(k, k + 40);
@@ -874,7 +912,8 @@ async function fixLegacyCards() {
     for (const { i, zh } of items) {
       const c = part[i];
       if (!c || !zh) continue;
-      c.expl = c.zh;
+      if (c.needGloss) delete c.needGloss;
+      else c.expl = c.zh;
       c.zh = zh;
     }
   }
@@ -882,7 +921,10 @@ async function fixLegacyCards() {
 }
 
 async function renderReview(box, cardsOverride) {
-  if (S().cards.some(isLegacyMistake) && hasKey()) {
+  splitCombinedCards();
+  // 每周复习传进来的卡片可能刚被拆分或补全过，按 id 换成最新的
+  if (cardsOverride) cardsOverride = cardsOverride.map((c) => S().cards.find((x) => x.id === c.id)).filter(Boolean);
+  if (S().cards.some((c) => isLegacyMistake(c) || c.needGloss) && hasKey()) {
     box.innerHTML = `<div class="rv-fixing">${spinner(T('正在给旧的纠错卡片补上中文意思…', 'Adding the meaning to older correction cards…'))}</div>`;
     try { await fixLegacyCards(); } catch (e) { console.warn('补全旧卡片失败', e); }
     if (!box.isConnected || !$('.rv-fixing', box)) return; // 等待期间已经切到别的步骤
